@@ -331,3 +331,131 @@ def test_with_real_hos_if_available():
         assert _relerr(getattr(wf, "wphi_" + s)[:, 0, :], a * om * E * np.sin(th)) < 5e-5
         assert _relerr(getattr(wf, "duphi_dz_" + s)[:, 0, :], a * om * k * E * np.cos(th)) < 5e-5
     assert _relerr(wf.eta[:, 0], a * np.cos(th[:, 0])) < 5e-5
+
+
+# ---------------------------------------------------------------------------
+# Adversarial tests (review): an FFT-free brute-force reference for arbitrary
+# coefficient arrays, odd / non-multiple grid sizes, real nonlinear HOS input,
+# cache separation between grids.
+def _brute_reference(c, eta_c, N, Lx, Nx, x, zc, zf):
+    """Direct trigonometric sums (no FFT) of the band-limited fields defined by
+    phi(x, z) = irfft(c e^{kz}, n=N), truncated to modes m < Nx/3.  A HOS Nyquist
+    mode (N even) inside the band contributes (1/N) Re(c) cos(kx) e^{kz}."""
+    out = {}
+    m_all = np.arange(N // 2 + 1)
+    sel = m_all < Nx / 3.0
+    m = m_all[sel]
+    k = 2 * math.pi / Lx * m
+    w = np.where(m == 0, 1.0, 2.0) / N                 # irfft weights
+    if N % 2 == 0:
+        w = np.where(m == N // 2, 1.0 / N, w)
+    cc = np.asarray(c)[sel].astype(complex)
+    ee = np.asarray(eta_c)[sel].astype(complex)
+    # irfft ignores the imaginary part of the DC and Nyquist coefficients
+    real_only = (m == 0) | ((N % 2 == 0) & (m == N // 2))
+    cc = np.where(real_only, cc.real, cc)
+    ee = np.where(real_only, ee.real, ee)
+    ph = np.exp(1j * k[None, :] * x[:, None])          # (Nx, nm)
+    for zz, s in ((zc, "c"), (zf, "f")):
+        E = np.exp(k[None, :] * zz[:, None])           # (nz, nm)
+        base = (w * cc)[None, None, :] * ph[:, None, :] * E[None, :, :]
+        f = lambda mult: np.real((base * mult).sum(-1))
+        out["uphi_" + s] = f(1j * k)
+        out["wphi_" + s] = f(k)
+        out["duphi_dx_" + s] = f(-k * k)
+        out["duphi_dz_" + s] = f(1j * k * k)
+        out["dwphi_dx_" + s] = f(1j * k * k)
+        out["dwphi_dz_" + s] = f(k * k)
+    eb = (w * ee)[None, :] * ph
+    out["eta"] = np.real(eb.sum(-1))
+    out["eta_x"] = np.real((eb * 1j * k).sum(-1))
+    out["irrot_stress_x"] = 2 * out["duphi_dz_f"][:, -1]
+    return out
+
+
+class _CoeffStub:
+    def __init__(self, N, c, eta, t=0.0):
+        self.N, self._c, self.eta, self.t = N, c, eta, t
+
+    def phi_modes(self):
+        return self._c
+
+
+def _cmp_brute(wf, ref, tol):
+    errs = {}
+    for n, r in ref.items():
+        a = getattr(wf, n)
+        errs[n] = _relerr(a.reshape(r.shape), r)
+        assert errs[n] < tol, (n, errs[n])
+    return max(errs.values())
+
+
+@pytest.mark.parametrize("Nx,N", [(45, 135), (45, 180), (47, 101), (48, 200),
+                                  (48, 50), (48, 30), (48, 24), (50, 77)])
+def test_odd_and_nonmultiple_sizes(Nx, N):
+    """Random spectra (incl. complex DC/Nyquist and energy at all modes) on
+    odd / non-multiple / coarser-than-LES HOS grids vs the brute-force sum."""
+    p = _small(Nx=Nx, hos_N=N, Nz=7)
+    grid = Grid(p)
+    rng = np.random.default_rng(Nx * 1000 + N)
+    nk = N // 2 + 1
+    mm = np.arange(nk)
+    amp = 1e-3 * N / (1.0 + mm) ** 1.5
+    c = amp * (rng.standard_normal(nk) + 1j * rng.standard_normal(nk))
+    ce = amp * (rng.standard_normal(nk) + 1j * rng.standard_normal(nk))
+    eta = np.fft.irfft(ce, n=N)
+    stub = _CoeffStub(N, c, eta, t=0.25)
+    wf = wave_fields_from_hos(stub, grid, p)
+    _shapes(wf, grid)
+    ref = _brute_reference(c, np.fft.rfft(eta), N, p.Lx, Nx, grid.x, grid.zc, grid.zf)
+    e = _cmp_brute(wf, ref, 1e-12)
+    print(f"Nx={Nx} N={N}: max rel err vs brute force {e:.2e}")
+
+
+def test_real_hos_nonlinear_packet_vs_brute_force():
+    """Nonlinear (M = 3, alpha = 0.12) packet from the real HOS after a few
+    steps: the coupling must reproduce exactly the band-limited potential
+    defined by the phi_modes() convention (independent of linear theory)."""
+    hos_mod = pytest.importorskip("wpt.hos")
+    p = tiny(Ny=8, workers=1, alpha=0.12)
+    grid = Grid(p)
+    h = hos_mod.HOS(p)
+    h.init_packet()
+    for _ in range(5):
+        h.step(p.T0 / 40)
+    c = h.phi_modes()
+    wf = wave_fields_from_hos(h, grid, p)
+    ref = _brute_reference(c, np.fft.rfft(h.eta), h.N, p.Lx, p.Nx, grid.x, grid.zc, grid.zf)
+    e = _cmp_brute(wf, ref, 1e-12)
+    print(f"real HOS packet: max rel err vs brute force {e:.2e}")
+    # sanity: the HOS-grid potential sampled on the LES points agrees with the
+    # dealiased LES field up to the energy above Nx/3 (tiny: m0 = 12, Nx/3 = 32,
+    # so the 3rd harmonic m = 36 ~ alpha^2 is cut: ~1 % difference expected)
+    phi_hos = np.fft.irfft(c * h.k * 1j, n=h.N)[:: h.N // p.Nx]
+    assert _relerr(wf.uphi_f[:, 0, -1], phi_hos) < 3e-2
+
+
+def test_cache_separates_grids():
+    """Two grids with the same (Nx, Nz) but different Lx / stretching used
+    alternately must not share cached exp(kz) tables."""
+    pa = _small()
+    pb = _small(Lx=2.5 * math.pi, z_stretch=0.7)   # m0 = 15 < Nx/3
+    ga, gb = Grid(pa), Grid(pb)
+    clear_cache()
+    for _ in range(2):
+        for p, g in ((pa, ga), (pb, gb)):
+            m0 = int(round(p.k0 * p.Lx / (2 * math.pi)))
+            stub = StubHOS(p.Lx, p.hos_N, p.g, [(m0, 1e-3 / p.k0, 0.3)], t=1e-4)
+            _check_all(wave_fields_from_hos(stub, g, p), stub, g, 1e-10)
+
+
+def test_output_dtype_and_layout():
+    p = _small()
+    grid = Grid(p)
+    wf = wave_fields_from_hos(StubHOS(p.Lx, p.hos_N, p.g, [(12, 1e-4, 0.1)]), grid, p)
+    for n in FIELDS_C + FIELDS_F + ["eta", "eta_x", "irrot_stress_x"]:
+        a = getattr(wf, n)
+        assert a.dtype == np.float64, n
+        assert a.flags.c_contiguous, n
+        assert np.all(np.isfinite(a)), n
+    assert isinstance(wf.t, float)

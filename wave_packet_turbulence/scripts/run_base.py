@@ -32,8 +32,10 @@ def make_solver(p):
     g = Grid(p)
     if p.sgs == "dynamic":
         sgs = DynamicSmagorinsky(g, p)
+        sgs.truncate_input = False
     elif p.sgs == "smagorinsky":
         sgs = Smagorinsky(g, p)
+        sgs.truncate_input = False
     else:
         sgs = None
     return g, LESSolver(p, g, sgs)

@@ -27,6 +27,12 @@ Implementation notes (see also the module docstrings of grid.py / bc.py)
   integrated directly (phi[0] = 0, then dzc-weighted mean removed) and its w set to 0.
 * After the step ``bc['u_s'], bc['v_s']`` are refreshed with the new u, v and the
   new surface gradient (``w_s`` stays the Dirichlet value used in the projection).
+* ``bc_extrapolate`` (default False = SPEC.md 4.1.1, lagged): ``bc_np1`` is computed
+  from u^n, v^n, w_s^n, which makes the scheme first order in time whenever eta != 0
+  (the rotational surface velocity is modulated at the wave frequency).  With
+  ``bc_extrapolate=True`` the inputs of ``surface_bc`` are linearly extrapolated to
+  t^{n+1} (``q^n + r (q^n - q^{n-1})``), which restores second order in time
+  (tests/test_les.py::test_time_order_with_waves).
 """
 from __future__ import annotations
 
@@ -81,13 +87,15 @@ class LESSolver:
     """Rotational-velocity LES (SPEC.md section 4)."""
 
     def __init__(self, p: Params, grid: Grid, sgs=None, surface_stress_on: bool = True,
-                 mean_pgrad_on: bool = True, uzz_method: str = "wave_scale"):
+                 mean_pgrad_on: bool = True, uzz_method: str = "wave_scale",
+                 bc_extrapolate: bool = False):
         self.params = p
         self.grid = grid
         self.sgs = sgs
         self.surface_stress_on = surface_stress_on
         self.mean_pgrad_on = mean_pgrad_on
         self.uzz_method = uzz_method
+        self.bc_extrapolate = bc_extrapolate
         self.cn_flux_both_new = False      # True -> SPEC 4.1.3 variant (dudz_s^{n+1} in A^n too)
         self.nu = p.nu
         g = grid
@@ -113,6 +121,7 @@ class LESSolver:
         self._bc_wave_t = None          # wave time used for self.bc (None: zero waves)
         self._hist = None               # (Exh, Eyh, Ezh) of the previous step
         self._dt_prev = None
+        self._prev_surf = None          # (u, v, w_top) of the previous step (bc_extrapolate)
         self._fac_cache = {}
 
         self._init_poisson()
@@ -205,13 +214,15 @@ class LESSolver:
         self.uh, self.vh, self.wh = uh, vh, wh
         self.ph = np.zeros_like(uh)
         self._refresh_physical()
-        h_t = g.dzf[-1]
-        bc["u_s"] = self.u[..., -1] + h_t * bc["dudz_s"]
-        bc["v_s"] = self.v[..., -1] + h_t * bc["dvdz_s"]
+        # surface data of the projected state; dw_s/dx from the surface w actually set
+        bc = surface_bc(self.u, self.v, self.w[..., -1], g, wf_use, self.params,
+                        tau_x=self._tau_x(), uzz_method=self.uzz_method)
+        bc["w_s"] = self.w[..., -1].copy()
         self.bc = bc
         self._bc_wave_t = None if wf is None else float(wf.t)
         self._hist = None
         self._dt_prev = None
+        self._prev_surf = None
         self.nut = None
 
     # ------------------------------------------------------------------
@@ -350,9 +361,17 @@ class LESSolver:
         if stale:
             bc_n = surface_bc(self.u, self.v, self.w[..., -1], g, wf_n, p, g_prev=self.bc,
                               tau_x=tau_x, uzz_method=self.uzz_method)
-        # 1. surface bc at n+1 (lagged corrections)
-        bc_np1 = surface_bc(self.u, self.v, self.w[..., -1], g, wf_np1, p, g_prev=bc_n,
+        # 1. surface bc at n+1 (lagged corrections, or extrapolated inputs)
+        ub, vb, wtb = self.u, self.v, self.w[..., -1]
+        if self.bc_extrapolate and self._prev_surf is not None and self._dt_prev:
+            r = dt / self._dt_prev
+            u0, v0, wt0 = self._prev_surf
+            ub = self.u + r * (self.u - u0)
+            vb = self.v + r * (self.v - v0)
+            wtb = wtb + r * (wtb - wt0)
+        bc_np1 = surface_bc(ub, vb, wtb, g, wf_np1, p, g_prev=bc_n,
                             tau_x=tau_x, uzz_method=self.uzz_method)
+        prev_surf = (self.u, self.v, self.w[..., -1].copy()) if self.bc_extrapolate else None
 
         # 2. explicit terms
         Exh, Eyh, Ezh = self._explicit(bc_n, wf_n, wave_active)
@@ -435,6 +454,7 @@ class LESSolver:
         self._refresh_physical()
         self._hist = (Exh, Eyh, Ezh)
         self._dt_prev = dt
+        self._prev_surf = prev_surf
         self.t += dt
         self.nstep += 1
         h_t = g.dzf[-1]
@@ -454,13 +474,12 @@ class LESSolver:
         """Courant numbers max|u| dt/dx, max|v| dt/dy, max|w| dt/dz (rotational and,
         if ``wf`` is given, total velocity u + u_phi) and the vertical viscous number."""
         g = self.grid
-        dzf_int = g.dzc  # vertical spacing around face k: use the smaller adjacent cell
         dzw = np.minimum(np.concatenate([[g.dzc[0]], g.dzc]), np.concatenate([g.dzc, [g.dzc[-1]]]))
         out = {
             "x": float(np.abs(self.u).max() * dt / g.dx),
             "y": float(np.abs(self.v).max() * dt / g.dy),
             "z": float((np.abs(self.w) / dzw).max() * dt),
-            "visc_z": float(self.nu * dt / dzf_int.min() ** 2),
+            "visc_z": float(self.nu * dt / g.dzc.min() ** 2),
         }
         if wf is not None:
             out["x_total"] = float(np.abs(self.u + wf.uphi_c).max() * dt / g.dx)
@@ -479,6 +498,8 @@ class LESSolver:
                  Nx=self.grid.Nx, Ny=self.grid.Ny, Nz=self.grid.Nz)
         if self._hist is not None:
             d["Exh"], d["Eyh"], d["Ezh"] = self._hist
+        if self._prev_surf is not None:
+            d["prev_u"], d["prev_v"], d["prev_wtop"] = self._prev_surf
         for k, v in self.bc.items():
             d["bc_" + k] = v
         np.savez(path, **d)
@@ -505,3 +526,8 @@ class LESSolver:
         else:
             self._hist = None
             self._dt_prev = None
+        if "prev_u" in z.files:
+            self._prev_surf = (np.array(z["prev_u"]), np.array(z["prev_v"]), np.array(z["prev_wtop"]))
+        else:
+            self._prev_surf = None
+        self.nut = None

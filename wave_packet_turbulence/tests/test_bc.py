@@ -194,3 +194,28 @@ def test_wave_scale_uzz():
     # small eta: falls back to (at least) a 2 dz stencil
     k1, k2, k3 = wave_scale_stencil(g, 0 * m.eta)
     assert k2 == g.Nz - 2 and k3 <= g.Nz - 3
+
+
+def test_bc_outputs_dealiased():
+    """Review test: products with eta must be truncated (2/3 rule), so with fields that
+    contain modes right below Nx/3 the O(alpha) parts of the outputs have no modes
+    >= Nx/3, Ny/3 (aliasing would put energy there or fold it back)."""
+    p = make_params(Nx=24, Ny=18, Nz=12)
+    g = Grid(p)
+    X = g.x.reshape(-1, 1)
+    Y = g.y.reshape(1, -1)
+    eta = 0.02 * np.cos(7 * X)
+    eta_x = -0.14 * np.sin(7 * X)
+    irr = 0.0 * eta
+    Z = g.zc.reshape(1, 1, -1)
+    u = (np.cos(7 * X + 5 * Y)[..., None] * (1 + Z + Z ** 2)) + 0 * Z
+    v = (np.sin(6 * X - 5 * Y)[..., None] * (1 - Z ** 2)) + 0 * Z
+    wtop = np.cos(7 * X - 5 * Y)
+    wf = surface_wave_fields(g, eta, eta_x, irr)
+    bc = surface_bc(u, v, wtop, g, wf, p, tau_x=0.0)
+    keep = g.dealias[..., 0]
+    for key in ("dudz_s", "dvdz_s", "w_s"):
+        h = g.fft(bc[key][..., None])[..., 0]
+        assert np.abs(h[~keep]).max() < 1e-10 * np.abs(h).max(), key
+    # exact (0,0) mode of w_s and, for eta*u products with zero mean, of the corrections
+    assert abs(bc["w_s"].mean()) < 1e-15

@@ -344,3 +344,187 @@ def test_wave_amplitude_stability():
     vbad = _wave_run("cubic", 150)
     print("cubic vmax", vbad)
     assert vbad > 100.0
+
+
+# ---------------------------------------------------------------------------
+# Adversarial tests added in review
+# ---------------------------------------------------------------------------
+def _ana_fields(X, Y, Z):
+    """Smooth, not divergence-free test fields with free-slip-consistent
+    du/dz = dv/dz = 0 and w = 0 at z = -1; returns value and x, y, z derivatives."""
+    A = 1 + 0.5 * np.cos(X) * np.sin(Y)
+    c, s_ = np.cos(Z + 1), np.sin(Z + 1)
+    u = dict(f=A * c, x=-0.5 * np.sin(X) * np.sin(Y) * c, y=0.5 * np.cos(X) * np.cos(Y) * c, z=-A * s_)
+    B, Bd = 0.4 * np.sin(X + Y), 0.4 * np.cos(X + Y)
+    v = dict(f=B * np.cosh(Z + 1) + 0.2, x=Bd * np.cosh(Z + 1), y=Bd * np.cosh(Z + 1),
+             z=B * np.sinh(Z + 1))
+    C, Cd = 0.5 * np.cos(X - Y), -0.5 * np.sin(X - Y)
+    th = math.pi * (Z + 1) / 2
+    sz = (Z + 1) * np.sin(th)
+    sdz = np.sin(th) + (Z + 1) * math.pi / 2 * np.cos(th)
+    w = dict(f=C * sz, x=Cd * sz, y=-Cd * sz, z=C * sdz)
+    return u, v, w
+
+
+def _ana_NC(X, Y, Z, a, k, om):
+    u, v, w = _ana_fields(X, Y, Z)
+    e = a * om * np.exp(k * Z)
+    ph = dict(u=e * np.cos(k * X), w=e * np.sin(k * X), ux=-k * e * np.sin(k * X),
+              uz=k * e * np.cos(k * X), wx=k * e * np.cos(k * X), wz=k * e * np.sin(k * X))
+    N = [2 * u['f'] * u['x'] + v['y'] * u['f'] + v['f'] * u['y'] + w['z'] * u['f'] + w['f'] * u['z'],
+         u['x'] * v['f'] + u['f'] * v['x'] + 2 * v['f'] * v['y'] + w['z'] * v['f'] + w['f'] * v['z'],
+         u['x'] * w['f'] + u['f'] * w['x'] + v['y'] * w['f'] + v['f'] * w['y'] + 2 * w['f'] * w['z']]
+    C = [ph['u'] * u['x'] + ph['w'] * u['z'] + u['f'] * ph['ux'] + w['f'] * ph['uz'],
+         ph['u'] * v['x'] + ph['w'] * v['z'],
+         ph['u'] * w['x'] + ph['w'] * w['z'] + u['f'] * ph['wx'] + w['f'] * ph['wz']]
+    return N, C
+
+
+def _explicit_errors(Nz, stretch):
+    """Errors of the explicit nonlinear term N (sec. 4.2) and of the wave coupling
+    C (sec. 4.3, all explicit) against the analytic expressions (2.5)."""
+    p = make_params(Re_tau=1e30, Lx=2 * math.pi, Ly=2 * math.pi, Nx=16, Ny=16, Nz=Nz,
+                    z_stretch=stretch, implicit_wave_vadv=False)
+    g = Grid(p)
+    s = LESSolver(p, g, surface_stress_on=False, mean_pgrad_on=False)
+    X = g.x.reshape(-1, 1, 1)
+    Y = g.y.reshape(1, -1, 1)
+    O = np.zeros((g.Nx, g.Ny, 1))
+    Zc, Zf = g.zc.reshape(1, 1, -1) + O, g.zf.reshape(1, 1, -1) + O
+    s.uh = s._fft(_ana_fields(X, Y, Zc)[0]['f'])
+    s.vh = s._fft(_ana_fields(X, Y, Zc)[1]['f'])
+    s.wh = s._fft(_ana_fields(X, Y, Zf)[2]['f'])
+    s._refresh_physical()
+    u0, v0, w0 = _ana_fields(X, Y, O)
+    bc = dict(u_s=u0['f'][..., 0], v_s=v0['f'][..., 0], w_s=w0['f'][..., 0],
+              dudz_s=u0['z'][..., 0], dvdz_s=v0['z'][..., 0])
+    wp = (0.05, 1.0, 3.0)
+    E0 = [s._ifft(e) for e in s._explicit(bc, zero_wave_fields(g), False)]
+    E1 = [s._ifft(e) for e in s._explicit(bc, linear_wave_fields(g, *wp, 0.0), True)]
+    Nc, Cc = _ana_NC(X, Y, Zc, *wp)
+    Nf, Cf = _ana_NC(X, Y, Zf, *wp)
+    rN = [E0[0] + Nc[0], E0[1] + Nc[1], (E0[2] + Nf[2])[..., 1:-1]]
+    rC = [E1[0] - E0[0] + Cc[0], E1[1] - E0[1] + Cc[1], (E1[2] - E0[2] + Cf[2])[..., 1:-1]]
+    interior = [np.abs(r[..., :-1]).max() for r in rN[:2]] + [np.abs(rN[2]).max()] + \
+               [np.abs(r).max() for r in rC]
+    top = np.abs(rN[0][..., -1]).max()
+    return np.array(interior), top
+
+
+@pytest.mark.parametrize("stretch", [0.0, 2.0])
+def test_explicit_terms_analytic(stretch):
+    """N(u) (divergence form) and the wave coupling C(u) of eq. (2.5) against hand-derived
+    expressions: second order in dz (the top-cell vertical flux of N is first order
+    locally, as expected for the one-sided boundary flux)."""
+    R = [_explicit_errors(Nz, stretch) for Nz in (16, 32, 64)]
+    E = np.array([r[0] for r in R])
+    T = np.array([r[1] for r in R])
+    orders = np.log2(E[:-1] / E[1:])
+    print("explicit-term errors (Nx, Ny, Nz, Cx, Cy, Cz):\n", E, "\norders\n", orders,
+          "\ntop cell N_x", T)
+    assert np.all(E[-1] < 1e-3)
+    assert np.all(orders[-1] > 1.8)
+    assert np.all(np.log2(T[:-1] / T[1:]) > 0.9)
+
+
+def _time_run(dt, eta_on, impl=True, extrap=False, both_new=False, T=0.24):
+    p = make_params(Re_tau=50.0, Lx=2 * math.pi, Ly=2 * math.pi, Nx=12, Ny=12, Nz=16,
+                    z_stretch=1.0, implicit_wave_vadv=impl)
+    g = Grid(p)
+    s = LESSolver(p, g, bc_extrapolate=extrap)
+    s.cn_flux_both_new = both_new
+    X = g.x.reshape(-1, 1, 1)
+    Y = g.y.reshape(1, -1, 1)
+    u, v, _ = _ana_fields(X, Y, g.zc.reshape(1, 1, -1))
+    w = 0.3 * np.cos(X - Y) * np.sin(math.pi * (g.zf.reshape(1, 1, -1) + 1))
+
+    def wfs(t):
+        wf = linear_wave_fields(g, 0.03, 1.0, 6.0, t)
+        if not eta_on:
+            wf.eta, wf.eta_x = 0 * wf.eta, 0 * wf.eta_x
+        return wf
+
+    wf0 = wfs(0.0)
+    s.set_state(u['f'], v['f'], w, wf=wf0)
+    for i in range(int(round(T / dt))):
+        wf1 = wfs((i + 1) * dt)
+        s.step(dt, wf0, wf1)
+        wf0 = wf1
+    return s.u.copy()
+
+
+def _time_orders(**kw):
+    R = [_time_run(dt, **kw) for dt in (0.012, 0.006, 0.003, 0.0015)]
+    e = np.array([np.abs(R[i] - R[i + 1]).max() for i in range(3)])
+    return e, np.log2(e[:-1] / e[1:])
+
+
+def test_time_order_with_waves():
+    """Self-convergence in dt with time-dependent wave fields: checks the time levels
+    of the wave terms (E^n with wf_n, A^{n+1} with wf_np1, Dirichlet w_s^{n+1}).
+    eta = 0 (exact BC): second order with implicit and explicit wphi d/dz.
+    eta != 0: lagged BC (SPEC default) is first order; bc_extrapolate restores ~2."""
+    e, o = _time_orders(eta_on=False, impl=True)
+    print("eta=0 implicit vadv", e, o)
+    assert o[-1] > 1.8
+    e, o = _time_orders(eta_on=False, impl=False)
+    print("eta=0 explicit vadv", e, o)
+    assert o[-1] > 1.8
+    e_lag, o_lag = _time_orders(eta_on=True)
+    print("eta!=0 lagged BC", e_lag, o_lag)
+    assert 0.8 < o_lag[-1] < 1.3
+    e_ex, o_ex = _time_orders(eta_on=True, extrap=True)
+    print("eta!=0 extrapolated BC", e_ex, o_ex)
+    assert o_ex[-1] > 1.6 and e_ex[-1] < 0.2 * e_lag[-1]
+
+
+def test_set_state_surface_data_consistent():
+    """After set_state the stored bc must describe the projected state: without waves
+    w_s = 0 and so dudz_s = Re_tau, dvdz_s = 0 exactly, whatever the input w at the top."""
+    p = make_params(Nx=16, Ny=12, Nz=10)
+    g = Grid(p)
+    s = LESSolver(p, g)
+    s.set_state(*random_state(g, 21))
+    assert np.abs(s.w[..., -1]).max() < 1e-14
+    assert np.abs(s.bc["dudz_s"] - p.Re_tau).max() < 1e-10
+    assert np.abs(s.bc["dvdz_s"]).max() < 1e-10
+    assert np.allclose(s.bc["u_s"], s.u[..., -1] + g.dzf[-1] * p.Re_tau)
+    # with waves: the stored w_s is the Dirichlet value actually present in w
+    wf = linear_wave_fields(g, 0.02, 2.0, 30.0, 0.0)
+    s.set_state(*random_state(g, 22), wf=wf)
+    assert np.abs(s.bc["w_s"] - s.w[..., -1]).max() == 0.0
+    assert np.abs(s.divergence()).max() < 1e-10 * np.abs(s.u).max() / g.dx
+
+
+@pytest.mark.parametrize("nxy", [(15, 9), (16, 11)])
+def test_odd_grid_sizes(nxy):
+    p = make_params(Nx=nxy[0], Ny=nxy[1], Nz=7, z_stretch=2.0)
+    g = Grid(p)
+    s = LESSolver(p, g, bc_extrapolate=True)
+    s.set_state(*random_state(g, 1))
+    wf0 = linear_wave_fields(g, 0.01, 1.0, 30.0, 0.0)
+    for n in range(3):
+        wf1 = linear_wave_fields(g, 0.01, 1.0, 30.0, (n + 1) * 1e-3)
+        s.step(1e-3, wf0, wf1)
+        wf0 = wf1
+    assert s.u.shape == (g.Nx, g.Ny, g.Nz) and s.w.shape == (g.Nx, g.Ny, g.Nz + 1)
+    assert np.abs(s.divergence()).max() < 1e-12 * np.abs(s.u).max() / g.dx
+    for a in (s.uh, s.vh, s.wh, s.ph):
+        assert np.abs(a[~np.broadcast_to(g.dealias, a.shape)]).max() == 0.0
+
+
+def test_save_load_roundtrip_extrapolated_bc(tmp_path):
+    p = make_params(Nx=16, Ny=8, Nz=10)
+    g = Grid(p)
+    s = LESSolver(p, g, bc_extrapolate=True)
+    s.set_state(*random_state(g, 2))
+    wfs = [linear_wave_fields(g, 0.01, 2.0, 30.0, n * 1e-3) for n in range(4)]
+    s.step(1e-3, wfs[0], wfs[1])
+    s.step(1e-3, wfs[1], wfs[2])
+    s.save(tmp_path / "ck.npz")
+    s2 = LESSolver(p, g, bc_extrapolate=True)
+    s2.load(tmp_path / "ck.npz")
+    s.step(1e-3, wfs[2], wfs[3])
+    s2.step(1e-3, wfs[2], wfs[3])
+    assert np.abs(s.u - s2.u).max() < 1e-12 * np.abs(s.u).max()
+    assert np.abs(s.bc["dudz_s"] - s2.bc["dudz_s"]).max() < 1e-10

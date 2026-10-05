@@ -67,8 +67,8 @@ horizontal wavenumbers, i.e. keep ``|mx| < Nx/6`` and ``my < Ny/6``;
 ``L_ij = hat(u_i u_j) - hat(u_i) hat(u_j)`` (with w interpolated to centres),
 ``M_ij = 2 Delta^2 [hat(|S| S_ij) - (Delta_hat/Delta)^2 |hat S| hat(S_ij)]``,
 both made deviatoric, ``Cs^2(z) = max(0, <L_ij M_ij>_xy / <M_ij M_ij>_xy)``;
-levels whose ``<M_ij M_ij>`` is at round-off level (relative to the velocity
-scale of the field) get ``Cs^2 = 0``.  ``nu_t = Cs^2 Delta^2 |S|``,
+levels whose ``<M_ij M_ij>`` is at round-off level (relative to
+``(2 Delta^2 max|S|^2)^2``) get ``Cs^2 = 0``.  ``nu_t = Cs^2 Delta^2 |S|``,
 ``|S| = sqrt(2 S_ij S_ij)``.
 """
 from __future__ import annotations
@@ -245,23 +245,38 @@ class DynamicSmagorinsky:
         whc = g.f2c(wh)                          # w at centres
 
         # resolved and test-filtered velocities at centres
-        vel = (R["ud"], R["vd"], g.f2c(R["wd"]))
-        velf = (self._tf_inv(uh), self._tf_inv(vh), self._tf_inv(whc))
+        # L_ij is invariant under a plane-uniform translation (the test filter
+        # preserves plane means), so the plane means are removed before the
+        # products: avoids cancellation of O(U^2) terms (mean current)
+        vel = []
+        for q in (R["ud"], R["vd"], g.f2c(R["wd"])):
+            q = q - q.mean(axis=(0, 1))
+            vel.append(q)
+        velf = []
+        for qh in (uh, vh, whc):
+            qh = qh.copy()
+            qh[0, 0, :] = 0.0
+            velf.append(self._tf_inv(qh))
 
-        # test-filtered strain rate (the filter commutes with the vertical FD)
-        dushf = self._irfft2d(R["dush"] * self.test_mask2d)
-        dvshf = self._irfft2d(R["dvsh"] * self.test_mask2d)
+        # test-filtered strain rate: the filter commutes with the vertical FD,
+        # so everything is formed on the (small) test-band spectra and only
+        # the final components are transformed back
+        tmx2 = self.tmx[:, :, 0]
+        dushf = R["dush"][:, :nyt] * tmx2
+        dvshf = R["dvsh"][:, :nyt] * tmx2
         Sf = [None] * 6
         Sf[0] = self._tf_inv(ikx * uh)
         Sf[1] = self._tf_inv(iky * vh)
         Sf[2] = self._tf_inv(g.ddz_f2c(wh))
         Sf[3] = self._tf_inv(0.5 * (iky * uh + ikx * vh))
-        Sf[4] = g.ddz_c(velf[0], 0.0, dushf)
-        Sf[4] += self._tf_inv(ikx * whc)
-        Sf[4] *= 0.5
-        Sf[5] = g.ddz_c(velf[1], 0.0, dvshf)
-        Sf[5] += self._tf_inv(iky * whc)
-        Sf[5] *= 0.5
+        a = self._ddz_c(uh, dushf)
+        a += ikx * whc
+        a *= 0.5
+        Sf[4] = self._tf_inv(a)
+        a = self._ddz_c(vh, dvshf)
+        a += iky * whc
+        a *= 0.5
+        Sf[5] = self._tf_inv(a)
         rSfmag = self._norm(Sf)
         rSfmag *= self.filter_ratio ** 2
 
@@ -294,10 +309,10 @@ class DynamicSmagorinsky:
         num *= twod2
         den *= twod2 ** 2
 
-        # round-off guard: M ~ 2 Delta^2 Sref^2 with Sref = Uref / min spacing
-        Uref = max(np.abs(vel[0]).max(), np.abs(vel[1]).max(), np.abs(vel[2]).max())
-        hmin = min(g.dx, g.dy, float(g.dzc.min()))
-        Sref = Uref / hmin
+        # round-off guard: M ~ 2 Delta^2 Sref^2 with Sref = max |S| (a
+        # Galilean-invariant strain scale; a uniform translation must not
+        # switch the model off)
+        Sref = float(Smag.max())
         npts = g.Nx * g.Ny
         thresh = self.guard * npts * (twod2 * Sref ** 2) ** 2
         ok = (den > thresh) & np.isfinite(num) & np.isfinite(den) & (den > 0.0)
@@ -365,7 +380,7 @@ class DynamicSmagorinsky:
     def compute(self, u, v, w, bc: dict) -> dict:
         """SGS stress divergence for the rotational velocity (u, v at centres,
         w at faces) with surface Neumann data ``bc['dudz_s'], bc['dvdz_s']``."""
-        R = self._resolved(u, v, w, bc)
+        R = self._resolved(u, v, w, bc if bc is not None else {})
         if self._cs2 is None or self.ncalls % max(1, int(self.update_interval)) == 0:
             self._cs2 = self._coefficient(R)
         self.ncalls += 1

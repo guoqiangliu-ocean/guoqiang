@@ -440,3 +440,209 @@ def test_dynamic_matches_reference_implementation(Ny, Ly):
     print("Cs^2 model:", out["cs2"], "\nraw ratio ref:", raw)
     np.testing.assert_allclose(m.last_num / m.last_den, raw, rtol=1e-9, atol=1e-14)
     np.testing.assert_allclose(out["cs2"], ref, rtol=1e-9, atol=1e-14)
+
+
+# ---------------------------------------------------------------------------
+# adversarial tests added in review
+def _analytic_strain(g, z_c, z_f):
+    """Exact S_ij of the field of :func:`_analytic` (centres for the
+    centre-located components, faces for S_13, S_23)."""
+    X = g.x[:, None, None]
+    Y = g.y[None, :, None]
+    pi = math.pi
+    a = np.sin(X) * np.cos(2 * Y)
+    b = np.cos(X) * np.sin(Y)
+    ax, ay = np.cos(X) * np.cos(2 * Y), -2 * np.sin(X) * np.sin(2 * Y)
+    bx, by = -np.sin(X) * np.sin(Y), np.cos(X) * np.cos(Y)
+    F = -(ax + by)
+    Fx = np.sin(X) * (np.cos(2 * Y) + np.cos(Y))
+    Fy = np.cos(X) * (2 * np.sin(2 * Y) + np.sin(Y))
+    c, s = np.cos(pi * z_c), np.sin(pi * z_c)
+    S11, S22, S33 = pi * ax * c, pi * by * c, pi * F * c
+    S12 = 0.5 * pi * c * (ay + bx)
+    S13c = 0.5 * s * (-pi ** 2 * a + Fx)
+    S23c = 0.5 * s * (-pi ** 2 * b + Fy)
+    sf = np.sin(pi * z_f)
+    S13f = 0.5 * sf * (-pi ** 2 * a + Fx)
+    S23f = 0.5 * sf * (-pi ** 2 * b + Fy)
+    return S11, S22, S33, S12, S13c, S23c, S13f, S23f
+
+
+def _nut_field(g, z):
+    X = g.x[:, None, None]
+    Y = g.y[None, :, None]
+    nut = 0.3 + 0.1 * np.cos(X) * np.sin(Y) + 0.1 * z ** 2
+    nx = -0.1 * np.sin(X) * np.sin(Y) + 0 * z
+    ny = 0.1 * np.cos(X) * np.cos(Y) + 0 * z
+    nz = 0.2 * z + 0 * X * Y
+    return nut, nx, ny, nz
+
+
+@pytest.mark.parametrize("stretch", [0.0, 1.5])
+def test_variable_nut_divergence_convergence(stretch):
+    """div(-2 nu_t S) for nu_t(x, y, z) against the exact
+    -nu_t lap(u_i) - 2 S_ij d_j nu_t.  Catches errors in the face interpolation
+    of nu_t, in the off-diagonal factors and in the staggering of tau_33.
+    Second order on the uniform grid (all cells) and in the interior of the
+    stretched grid."""
+    errs, errs_in = [], []
+    for Nz in (16, 32, 64):
+        p, g = make_grid(Nx=16, Ny=16, Nz=Nz, z_stretch=stretch)
+        m = DynamicSmagorinsky(g, p)
+        u, v, w, lu, lv, lw = _analytic(g)
+        nut_c, nxc, nyc, nzc = _nut_field(g, g.zc)
+        nut_f, nxf, nyf, nzf = _nut_field(g, g.zf)
+        S11, S22, S33, S12, S13c, S23c, S13f, S23f = _analytic_strain(g, g.zc, g.zf)
+        # exact divergence; S_31 / S_32 / S_33 at faces for the z equation
+        S33f = math.pi * np.cos(math.pi * g.zf) * (
+            -(np.cos(g.x[:, None, None]) * np.cos(2 * g.y[None, :, None])
+              + np.cos(g.x[:, None, None]) * np.cos(g.y[None, :, None])))
+        ex_x = -nut_c * lu - 2 * (S11 * nxc + S12 * nyc + S13c * nzc)
+        ex_y = -nut_c * lv - 2 * (S12 * nxc + S22 * nyc + S23c * nzc)
+        ex_z = -nut_f * lw - 2 * (S13f * nxf + S23f * nyf + S33f * nzf)
+        out = m.divergence_from_nut(u, v, w, zero_bc(g), nut_c)
+        e = [np.abs(out["div_x"] - ex_x).max(axis=(0, 1)) / np.abs(ex_x).max(),
+             np.abs(out["div_y"] - ex_y).max(axis=(0, 1)) / np.abs(ex_y).max(),
+             np.abs(out["div_z"] - ex_z).max(axis=(0, 1))[1:-1] / np.abs(ex_z).max()]
+        errs.append([a.max() for a in e])
+        errs_in.append([a[1:-1].max() for a in e])
+    errs, errs_in = np.array(errs), np.array(errs_in)
+    orders = np.log2(errs[:-1] / errs[1:])
+    orders_in = np.log2(errs_in[:-1] / errs_in[1:])
+    print(f"stretch={stretch}: errors\n{errs}\norders\n{orders}\ninterior orders\n{orders_in}")
+    assert np.all(orders_in[-1] > 1.8)
+    assert np.all(errs_in[-1] < 2e-3)
+    if stretch == 0.0:
+        assert np.all(orders[-1] > 1.8)
+    else:
+        assert np.all(orders[-1] > 0.9)
+
+
+@pytest.mark.parametrize("Model", MODELS)
+def test_discrete_dissipation_identity(Model):
+    """Summation by parts: with w_s = 0 the discrete SGS work
+    sum(u div_x dzc + v div_y dzc + w div_z dzf) equals
+    sum 2 nu_t (S11^2+S22^2+S33^2+2 S12^2) dzc + sum nu_t,f (a_13^2 + a_23^2) dzf
+    >= 0 (a_13 = du/dz + dw/dx at interior faces).  Catches sign / weight /
+    staggering errors in the divergence."""
+    p, g = make_grid(Nx=32, Ny=24, Nz=12, Ly=math.pi, z_stretch=1.5)
+    m = Model(g, p)
+    u, v, w = random_divfree(g, seed=12, mean_shear=2.0, surface_w=False)
+    rng = np.random.default_rng(2)
+    bc = {"dudz_s": 2.0 + rng.standard_normal((g.Nx, g.Ny)),
+          "dvdz_s": rng.standard_normal((g.Nx, g.Ny))}
+    out = m.compute(u, v, w, bc)
+    assert np.abs(w[..., -1]).max() == 0.0
+    work = (np.sum((u * out["div_x"] + v * out["div_y"]) * g.dzc)
+            + np.sum((w * out["div_z"]) * g.dzf))
+    S, _ = m.strain_rate(u, v, w, bc)
+    nut = out["nut"]
+    centre = np.sum(2 * nut * (S[0] ** 2 + S[1] ** 2 + S[2] ** 2 + 2 * S[3] ** 2) * g.dzc)
+    nutf = g.c2f(nut, 0.0, 0.0)
+    uz = g.ddz_c2f(u)
+    vz = g.ddz_c2f(v)
+    wx = g.ifft(g.ddx(g.fft(w)))
+    wy = g.ifft(g.ddy(g.fft(w)))
+    face = np.sum((nutf * ((uz + wx) ** 2 + (vz + wy) ** 2))[..., 1:-1] * g.dzf[1:-1])
+    print(Model.__name__, "work", work, "centre+face", centre + face)
+    assert centre + face > 0
+    assert abs(work - (centre + face)) < 1e-11 * (centre + face)
+
+
+@pytest.mark.parametrize("Nx,Ny,Ly", [(33, 27, math.pi), (35, 30, 2 * math.pi), (30, 25, math.pi)])
+def test_dynamic_reference_odd_sizes(Nx, Ny, Ly):
+    """Pruned test-filter transforms must equal full rfft2 + mask also for odd
+    and non-multiple-of-6 grid sizes."""
+    p, g = make_grid(Nx=Nx, Ny=Ny, Nz=8, Ly=Ly)
+    m = DynamicSmagorinsky(g, p)
+    u, v, w = random_divfree(g, seed=13, mean_shear=3.0)
+    rng = np.random.default_rng(7)
+    v = v + 0.03 * rng.standard_normal(v.shape)          # non-dealiased noise
+    dus = 3.0 + 0.3 * rng.standard_normal((g.Nx, g.Ny))
+    dvs = 0.3 * rng.standard_normal((g.Nx, g.Ny))
+    out = m.compute(u, v, w, {"dudz_s": dus, "dvdz_s": dvs})
+    ref, raw = _reference_cs2(g, u, v, w, dus, dvs)
+    np.testing.assert_allclose(m.last_num / m.last_den, raw, rtol=1e-9, atol=1e-14)
+    np.testing.assert_allclose(out["cs2"], ref, rtol=1e-9, atol=1e-14)
+
+
+def test_dynamic_invariances():
+    """Cs^2(z) is invariant under velocity scaling (L and M both quadratic) and
+    under periodic translations by whole grid cells; outputs translate."""
+    p, g = make_grid(Nx=32, Ny=32, Nz=10)
+    m = DynamicSmagorinsky(g, p)
+    u, v, w = random_divfree(g, seed=14, mean_shear=2.0)
+    rng = np.random.default_rng(8)
+    dus = 2.0 + rng.standard_normal((g.Nx, g.Ny))
+    dvs = rng.standard_normal((g.Nx, g.Ny))
+    o1 = m.compute(u, v, w, {"dudz_s": dus, "dvdz_s": dvs})
+    raw1 = m.last_num / m.last_den
+    lam = 37.0
+    o2 = m.compute(lam * u, lam * v, lam * w, {"dudz_s": lam * dus, "dvdz_s": lam * dvs})
+    np.testing.assert_allclose(m.last_num / m.last_den, raw1, rtol=1e-10, atol=1e-16)
+    sc = np.abs(o1["div_x"]).max()
+    assert np.abs(o2["div_x"] - lam ** 2 * o1["div_x"]).max() < 1e-9 * lam ** 2 * sc
+    sh = lambda a: np.roll(np.roll(a, 5, axis=0), -3, axis=1)
+    o3 = m.compute(sh(u), sh(v), sh(w), {"dudz_s": sh(dus), "dvdz_s": sh(dvs)})
+    np.testing.assert_allclose(m.last_num / m.last_den, raw1, rtol=1e-10, atol=1e-16)
+    for k in ("div_x", "div_y", "div_z", "nut"):
+        assert np.abs(o3[k] - sh(o1[k])).max() < 1e-11 * np.abs(o1[k]).max(), k
+
+
+@pytest.mark.parametrize("truncate_input", [True, False])
+def test_inputs_not_modified(truncate_input):
+    p, g = make_grid(Nx=24, Ny=24, Nz=8)
+    m = DynamicSmagorinsky(g, p)
+    m.truncate_input = truncate_input
+    u, v, w = random_divfree(g, seed=15, mean_shear=1.0)
+    bc = zero_bc(g, 1.0, 0.5)
+    copies = [a.copy() for a in (u, v, w, bc["dudz_s"], bc["dvdz_s"])]
+    for _ in range(2):
+        m.compute(u, v, w, bc)
+    for a, b in zip((u, v, w, bc["dudz_s"], bc["dvdz_s"]), copies):
+        np.testing.assert_array_equal(a, b)
+
+
+def test_scalar_bc_and_float32_input():
+    """Scalar Neumann data and float32 inputs are accepted and give the same
+    result as full float64 arrays."""
+    p, g = make_grid(Nx=24, Ny=24, Nz=8)
+    m = DynamicSmagorinsky(g, p)
+    u, v, w = random_divfree(g, seed=16, mean_shear=1.5)
+    o1 = m.compute(u, v, w, zero_bc(g, 1.5, 0.0))
+    o2 = m.compute(u, v, w, {"dudz_s": 1.5, "dvdz_s": 0.0})
+    for k in ("div_x", "div_y", "div_z", "nut", "cs2"):
+        np.testing.assert_allclose(o2[k], o1[k], rtol=1e-12, atol=1e-14)
+        assert o2[k].dtype == np.float64
+    o3 = m.compute(u.astype(np.float32), v.astype(np.float32), w.astype(np.float32),
+                   {"dudz_s": 1.5, "dvdz_s": 0.0})
+    assert o3["div_x"].dtype == np.float64
+    assert np.abs(o3["div_x"] - o1["div_x"]).max() < 1e-4 * np.abs(o1["div_x"]).max()
+
+
+def test_galilean_invariance_large_translation():
+    """A large uniform translation (here 1e6, as an extreme mean current) must
+    not trip the round-off guard of <M M>: Cs^2 unchanged to the precision
+    left after the shift."""
+    p, g = make_grid(Nx=32, Ny=32, Nz=12)
+    m = DynamicSmagorinsky(g, p)
+    u, v, w = random_divfree(g, seed=17, mean_shear=1.0)
+    bc = zero_bc(g, 1.0, 0.0)
+    o1 = m.compute(u, v, w, bc)
+    raw1 = m.last_num / m.last_den
+    assert o1["cs2"].max() > 0
+    U = 1.0e6
+    o2 = m.compute(u + U, v - U, w, bc)
+    raw2 = m.last_num / m.last_den
+    print("max |d raw|:", np.abs(raw2 - raw1).max(), "max raw:", np.abs(raw1).max())
+    assert np.abs(raw2 - raw1).max() < 1e-6 * np.abs(raw1).max()
+    np.testing.assert_allclose(o2["cs2"], o1["cs2"], rtol=1e-6, atol=1e-8 * o1["cs2"].max())
+
+
+def test_bc_none_means_zero_gradients():
+    p, g = make_grid(Nx=16, Ny=16, Nz=8)
+    m = Smagorinsky(g, p)
+    u, v, w = random_divfree(g, seed=18)
+    o1 = m.compute(u, v, w, zero_bc(g))
+    o2 = m.compute(u, v, w, None)
+    np.testing.assert_array_equal(o1["div_x"], o2["div_x"])

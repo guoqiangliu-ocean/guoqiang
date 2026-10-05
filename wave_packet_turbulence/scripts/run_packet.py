@@ -36,8 +36,10 @@ def run_member(p, case, member, base_dir, out_dir, n_samples, budget, log):
     g = Grid(p)
     if p.sgs == "dynamic":
         sgs = DynamicSmagorinsky(g, p)
+        sgs.truncate_input = False
     elif p.sgs == "smagorinsky":
         sgs = Smagorinsky(g, p)
+        sgs.truncate_input = False
     else:
         sgs = None
     solver = LESSolver(p, g, sgs)

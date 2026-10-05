@@ -387,3 +387,110 @@ def test_performance_N768_M3():
         best = min(best, (time.perf_counter() - t0) / 20)
     print(f"RK4 step N=768 M=3: {best * 1e3:.3f} ms")
     assert best < 5e-3
+
+
+# ---------------------------------------------------------------------------
+# Adversarial checks added in review
+def _exact_zakharov_rhs(h, eta, phis):
+    """Reference right-hand side without any perturbation expansion: the
+    Dirichlet problem phi(x, eta(x)) = phis is solved directly by collocation
+    with the exact deep-water basis exp(|k| z) e^{ikx} evaluated at z = eta(x)
+    (dense least squares), W = phi_z(x, eta) is evaluated exactly, and the
+    Zakharov equations are formed pointwise."""
+    N, x, k = h.N, h.x, h.k
+    kk = k[1:N // 2]
+    Ez = np.exp(np.outer(eta, kk))
+    C, S = np.cos(np.outer(x, kk)) * Ez, np.sin(np.outer(x, kk)) * Ez
+    A = np.hstack([np.ones((N, 1)), C, S])
+    c = np.linalg.lstsq(A, phis, rcond=None)[0]
+    assert np.abs(A @ c - phis).max() < 1e-9 * np.abs(phis).max()
+    W = np.hstack([np.zeros((N, 1)), kk * C, kk * S]) @ c
+    ik = 1j * k
+    ik[-1] = 0.0
+    ex = np.fft.irfft(ik * np.fft.rfft(eta), N)
+    px = np.fft.irfft(ik * np.fft.rfft(phis), N)
+    de = -ex * px + (1 + ex ** 2) * W
+    dp = -h.g * eta - 0.5 * px ** 2 + 0.5 * (1 + ex ** 2) * W ** 2
+    return de, dp
+
+
+def test_rhs_vs_exact_dirichlet_to_neumann():
+    """Independent check of every nonlinear term: for a smooth multi-mode,
+    non-symmetric state of slope amplitude s the order-M HOS rhs differs from
+    the exact Zakharov rhs by O(s^(M+1)), i.e. the error relative to the
+    (linear, O(s)) rhs scale converges with order M in s.  A wrong sign or
+    coefficient in any term of order n <= M would cap the order at n - 1."""
+    N = 64
+    amps = (0.1, 0.05, 0.025)
+    for M in (1, 2, 3, 4):
+        h = HOS(_mono_params(hos_N=N, hos_order=M))
+        x = h.x
+        errs = []
+        for s in amps:
+            eta = s * (np.cos(2 * x + 0.3) / 2 + 0.5 * np.cos(3 * x - 1.0) / 3
+                       + 0.3 * np.sin(5 * x) / 5)
+            phis = s * math.sqrt(h.g) * (np.sin(2 * x) / 2 ** 1.5
+                                         + 0.4 * np.cos(3 * x + 0.2) / 3 ** 1.5
+                                         + 0.2 * np.sin(4 * x + 1) / 4 ** 1.5)
+            de, dp = h.rhs(eta, phis)
+            dee, dpe = _exact_zakharov_rhs(h, eta, phis)
+            errs.append((np.abs(de - dee).max() / np.abs(dee).max(),
+                         np.abs(dp - dpe).max() / np.abs(dpe).max()))
+        errs = np.array(errs)
+        orders = np.log2(errs[:-1] / errs[1:])
+        print(f"M={M}: rel rhs err at s={amps}: eta_t {errs[:, 0]}, phis_t {errs[:, 1]}; "
+              f"orders {orders.ravel().round(2)}")
+        assert np.all(np.abs(orders - M) < 0.15)
+    # absolute size for the production order at slope 0.1
+    assert errs[0].max() < 1e-4                      # (M = 4 here)
+
+
+def test_mass_conservation_and_reversibility():
+    """int eta dx is a conserved quantity of the HOS equations (exactly, to
+    round-off, for the order-consistent truncation), and the rhs has the
+    time-reversal symmetry (eta, phis) -> (eta, -phis): eta_t -> -eta_t,
+    phis_t -> phis_t."""
+    p = Params(alpha=0.12, hos_N=256, workers=1)
+    h = HOS(p)
+    h.init_packet()
+    m0 = h.eta.mean()
+    de, dp = h.rhs(h.eta, h.phis)
+    de2, dp2 = h.rhs(h.eta, -h.phis)
+    assert np.abs(de + de2).max() < 1e-12 * np.abs(de).max()
+    assert np.abs(dp - dp2).max() < 1e-12 * np.abs(dp).max()
+    drift = 0.0
+    for _ in range(200):
+        h.step(DT)
+        drift = max(drift, abs(h.eta.mean() - m0))
+    print(f"mean(eta) drift over 200 steps: {drift / p.a0:.1e} a0")
+    assert drift < 1e-13 * p.a0
+    # forward n steps, flip phis, forward n steps -> back to the start (to RK4 error)
+    h = HOS(p)
+    h.init_packet()
+    e0 = h.eta.copy()
+    _run(h, 2 * p.T0)
+    h.phis = -h.phis
+    _run(h, 2 * p.T0)
+    err = np.abs(h.eta - e0).max() / p.a0
+    print(f"time-reversal error after 2+2 T0: {err:.1e} a0")
+    assert err < 1e-4
+
+
+def test_constructor_edge_cases():
+    with pytest.raises(ValueError):
+        HOS(_mono_params(hos_N=63))
+    with pytest.raises(ValueError):
+        HOS(_mono_params(hos_order=0))
+    h = HOS(_mono_params(hos_N=64))
+    with pytest.raises(ValueError):
+        h.init_monochromatic(1e-3, 12.5)               # not a periodic mode
+    with pytest.raises(ValueError):
+        h.init_monochromatic(1e-3, 32.0)               # Nyquist mode
+    # Nyquist mode of phi_modes is zero; mean of the returned spectrum is real
+    h.init_monochromatic(0.05 / 12, 12.0)
+    c = h.phi_modes()
+    assert c[-1] == 0 and abs(c[0].imag) < 1e-12 * np.abs(c).max()
+    # padding grid always satisfies the (M+1)N/2 rule, also when next_fast_len is odd
+    for N, M in ((250, 2), (768, 3), (1024, 3), (96, 5)):
+        hh = HOS(_mono_params(hos_N=N, hos_order=M))
+        assert hh.Np >= (M + 1) * N / 2 and hh.Np % 2 == 0
