@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+data/base/*.npz
+data/*/acc_member_*.npz
+data/**/ckpt_*.npz
