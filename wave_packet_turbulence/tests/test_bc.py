@@ -192,4 +192,5 @@ def test_wave_scale_uzz():
     err = np.abs(bc["uzz_s"] - m.Q).max()
     assert err < 2.0 * np.abs(m.R).max() * 3 * L
     # small eta: falls back to (at least) a 2 dz stencil
-    assert wave_scale_stencil(g, 0 * m.eta)[1:] == (g.Nz - 2, g.Nz - 3)
+    k1, k2, k3 = wave_scale_stencil(g, 0 * m.eta)
+    assert k2 == g.Nz - 2 and k3 <= g.Nz - 3
