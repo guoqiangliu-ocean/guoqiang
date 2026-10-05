@@ -56,6 +56,18 @@ RK4 stability limit 2.83 on the imaginary axis).
 
 Spectral convention: ``numpy.fft.rfft`` (unnormalised forward), wavenumbers
 ``k = 2 pi m / Lx``, m = 0..N/2.
+
+Notes on behaviour (measured, see tests/test_hos.py)
+----------------------------------------------------
+* RK4 at omega0 dt = 0.13 dissipates energy at a rate ~ (omega dt)^5: for the
+  W12 packet the full energy decreases by ~5e-6 per period (2.8e-4 over the
+  whole run t2 = 0.04 ~ 59 T0), linearly in time; no high-wavenumber growth is
+  observed for N = 768 or 1024 over that run, so no filter is needed.
+* The linear initial condition (2.17)-(2.18) uses omega0/k0 for every
+  component of the finite-bandwidth packet, so it is not a pure right-going
+  packet: a weak left-going wave group of relative amplitude ~ eps/4 (~3 % of
+  a0, shape ~ derivative of the Gaussian) is released, together with the
+  usual free second-order harmonics.  This is a property of the paper's set-up.
 """
 from __future__ import annotations
 
@@ -122,7 +134,6 @@ class HOS:
         # powers |k|^j (j = 0..M) of the truncated wavenumber, rows
         self._kpow = np.vstack([self._kk ** j for j in range(self.M + 1)])
         self._fact = [math.factorial(l) for l in range(self.M + 1)]
-        self._modes_cache = None     # (eta_bytes_id, modes)
 
     # ------------------------------------------------------------------
     # transforms
@@ -196,12 +207,14 @@ class HOS:
     # ------------------------------------------------------------------
     # HOS core
     def _modes(self, eh: np.ndarray, ph: np.ndarray):
-        """HOS modal expansion.  Returns (phihat list m = 1..M, E (padded eta),
-        D dict (m) -> padded rows d^j phi^(m)/dz^j, j = 1..M-m+1)."""
+        """HOS modal expansion (M >= 2).  Returns
+        phih : list, phih[m] = truncated spectrum of phi^(m)|_{z=0}, m = 1..M;
+        E    : eta on the padded grid;
+        Epow : Epow[l] = eta^l on the padded grid, l = 1..M-1;
+        D    : D[m][j-1] = d^j phi^(m)/dz^j |_0 on the padded grid, j = 1..M-m+1."""
         M = self.M
         kp = self._kpow
         fact = self._fact
-        # batch 1: eta, eta_x (unused here) are done by the caller; here phi^(1)
         E = self._to_pad(eh)
         Epow = [None, E]
         for l in range(2, M):
@@ -317,9 +330,9 @@ class HOS:
         """Vertical velocity at the surface, W = phi_z(x, eta) (order M)."""
         eh = self._fwd(self.eta)
         ph = self._fwd(self.phis)
-        phih, E, Epow, D = self._modes(eh, ph) if self.M > 1 else ([None, ph], None, None, None)
         if self.M == 1:
             return self._inv(self._kk * ph)
+        _, _, Epow, D = self._modes(eh, ph)
         acc = 0.0
         for m in range(1, self.M + 1):
             for l in range(0, self.M - m + 1):

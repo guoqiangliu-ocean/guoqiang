@@ -305,3 +305,29 @@ def test_performance_reduced():
     med = float(np.median(ts))
     print(f"wave_fields_from_hos reduced grid: median {med*1e3:.2f} ms, min {min(ts)*1e3:.2f} ms")
     assert med < 15e-3
+
+
+# ---------------------------------------------------------------------------
+def test_with_real_hos_if_available():
+    """Integration cross-check with wpt.hos.HOS (skipped if not importable):
+    small-amplitude monochromatic wave, a few RK4 steps, compare with linear theory.
+    The tolerance covers the RK4 phase error of HOS (not a coupling error)."""
+    hos_mod = pytest.importorskip("wpt.hos")
+    p = reduced(Ny=8, workers=1)
+    grid = Grid(p)
+    h = hos_mod.HOS(p)
+    if not hasattr(h, "init_monochromatic"):
+        pytest.skip("HOS.init_monochromatic not available")
+    a, k, om = 1e-3 / p.k0, p.k0, p.omega0
+    h.init_monochromatic(a, k)
+    for _ in range(10):
+        h.step(p.T0 / 80)
+    wf = wave_fields_from_hos(h, grid, p)
+    assert wf.t == h.t
+    th = k * grid.x[:, None] - om * h.t
+    for zz, s in ((grid.zc, "c"), (grid.zf, "f")):
+        E = np.exp(k * zz)[None, :]
+        assert _relerr(getattr(wf, "uphi_" + s)[:, 0, :], a * om * E * np.cos(th)) < 5e-5
+        assert _relerr(getattr(wf, "wphi_" + s)[:, 0, :], a * om * E * np.sin(th)) < 5e-5
+        assert _relerr(getattr(wf, "duphi_dz_" + s)[:, 0, :], a * om * k * E * np.cos(th)) < 5e-5
+    assert _relerr(wf.eta[:, 0], a * np.cos(th[:, 0])) < 5e-5

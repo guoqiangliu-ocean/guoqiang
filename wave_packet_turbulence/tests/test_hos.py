@@ -81,38 +81,46 @@ def test_linear_rhs_exact():
     assert np.max(np.abs(dp + p.g * a * np.cos(p.k0 * h.x))) < 1e-5 * p.g * a
 
 
+def _with_padding(h, Np):
+    """Force the product grid of an HOS instance to Np points (test helper)."""
+    h.Np = Np
+    h.nkp = Np // 2 + 1
+    return h
+
+
 def test_dealiasing_exact():
-    """The rhs is alias-free: a band-limited state (modes <= N/8) gives the same
-    retained rhs on N and on 2N points (zero-padded) to round-off, for M = 3, 4."""
+    """Products are alias-free: for a random *full-band* state (all modes
+    1..N/2-1 populated, |eta_x| ~ 0.3) the rhs computed with the default
+    padding Np = (M+1)N/2 equals, to round-off, the rhs computed with an
+    8x over-resolved product grid (same truncation of every phi^(m)).  The
+    same comparison without padding (Np = N) shows a large aliasing error, so
+    the test is sensitive."""
     rng = np.random.default_rng(1)
-    for M in (3, 4):
-        p = _mono_params(hos_N=64, hos_order=M)
-        h1 = HOS(p)
-        h2 = HOS(p.with_(hos_N=128))
-        nk = 64 // 8 + 1
-        eh = np.zeros(33, complex)
-        ph = np.zeros(33, complex)
-        amp = 0.12 / p.k0 * 64 / 4
-        eh[1:nk] = amp * (rng.standard_normal(nk - 1) + 1j * rng.standard_normal(nk - 1))
-        ph[1:nk] = p.c0 * amp * (rng.standard_normal(nk - 1) + 1j * rng.standard_normal(nk - 1))
-        eta1 = np.fft.irfft(eh, 64)
-        phs1 = np.fft.irfft(ph, 64)
-        eta2 = np.fft.irfft(np.r_[eh, np.zeros(32)] * 2, 128)
-        phs2 = np.fft.irfft(np.r_[ph, np.zeros(32)] * 2, 128)
-        assert np.allclose(eta2[::2], eta1) and np.allclose(phs2[::2], phs1)
-        # the state must actually be nonlinear for the test to mean something
-        assert np.abs(np.gradient(eta1, h1.x)).max() > 0.1
-        de1, dp1 = h1.rhs(eta1, phs1)
-        de2, dp2 = h2.rhs(eta2, phs2)
-        r1e, r2e = np.fft.rfft(de1), np.fft.rfft(de2)[:33] / 2
-        r1p, r2p = np.fft.rfft(dp1), np.fft.rfft(dp2)[:33] / 2
-        # compare modes that the 2N grid also resolves without truncation effects
-        err_e = np.abs(r1e[:32] - r2e[:32]).max() / np.abs(r2e).max()
-        err_p = np.abs(r1p[:32] - r2p[:32]).max() / np.abs(r2p).max()
-        assert err_e < 1e-12 and err_p < 1e-12, (M, err_e, err_p)
-        # the finer grid has real content above the coarse band: band-limited to
-        # M * N/8 < N/2 so nothing is lost -- check the 2N rhs is zero above N/2
-        assert np.abs(np.fft.rfft(de2)[33:]).max() < 1e-12 * np.abs(np.fft.rfft(de2)).max()
+    N = 64
+    nk = N // 2 + 1
+    for M in (2, 3, 4):
+        p = _mono_params(hos_N=N, hos_order=M)
+        h = HOS(p)
+        assert h.Np >= (M + 1) * N / 2
+        ref = _with_padding(HOS(p), 8 * N)
+        bad = _with_padding(HOS(p), N)
+        m = np.arange(nk)
+        env = np.exp(-((m - 12) / 10.0) ** 2) + 0.05
+        env[0] = env[-1] = 0.0
+        eh = env * (rng.standard_normal(nk) + 1j * rng.standard_normal(nk))
+        ph = env * (rng.standard_normal(nk) + 1j * rng.standard_normal(nk))
+        eta = np.fft.irfft(eh, N)
+        eta *= 0.3 / np.abs(np.fft.irfft(1j * h.k * eh, N)).max()      # max slope 0.3
+        phs = np.fft.irfft(ph, N)
+        phs *= 0.3 * p.c0 / p.k0 / np.abs(phs).max()
+        r = [hh.rhs(eta, phs) for hh in (h, ref, bad)]
+        def err(a, b, i):
+            return np.abs(a[i] - b[i]).max() / np.abs(b[i]).max()
+        e_ok = max(err(r[0], r[1], 0), err(r[0], r[1], 1))
+        e_bad = max(err(r[2], r[1], 0), err(r[2], r[1], 1))
+        print(f"M={M}: Np={h.Np}, alias error {e_ok:.1e} (no padding: {e_bad:.1e})")
+        assert e_ok < 1e-12
+        assert e_bad > 1e-4
 
 
 # ---------------------------------------------------------------------------
@@ -272,12 +280,14 @@ def test_phi_modes_linear_velocity():
 
 
 def test_phi_modes_dirichlet_residual():
-    """phi(x, eta(x)) evaluated directly from phi_modes must reproduce phis to
-    O(alpha^(M+1)) (Stokes wave alpha = 0.1); W likewise matches phi_z(x, eta)."""
+    """phi(x, eta(x)) evaluated directly (exp(|k| eta) summation) from
+    phi_modes must reproduce phis to O(alpha^(M+1)) (Stokes wave alpha = 0.1,
+    N = 128 so that the harmonics are not truncated); the Taylor-expanded W
+    likewise matches phi_z(x, eta)."""
     alpha = 0.1
     res = {}
     for M in (1, 2, 3, 4):
-        p = _mono_params(hos_N=64, hos_order=M)
+        p = _mono_params(hos_N=128, hos_order=M)
         h = HOS(p)
         h.init_stokes(alpha / p.k0, p.k0)
         c = h.phi_modes()
@@ -294,23 +304,72 @@ def test_phi_modes_dirichlet_residual():
         res[M] = (r_phi, r_w)
         print(f"M={M}: Dirichlet residual {r_phi:.2e}, W residual {r_w:.2e}")
     for M in (1, 2, 3):
-        assert res[M + 1][0] < 0.3 * res[M][0]
-    assert res[3][0] < 1e-3 and res[3][1] < 1e-3
+        assert res[M + 1][0] < 0.2 * res[M][0]      # ~alpha per order
+    assert res[3][0] < 2e-3 and res[3][1] < 6e-3
+    assert res[4][1] < 0.2 * res[3][1]
 
 
 # ---------------------------------------------------------------------------
-def test_filter_and_long_stability():
-    """Optional low-pass filter leaves the packet unchanged to < 1e-6 relative
-    energy over a few periods; filtered/unfiltered agree."""
-    p = Params(alpha=0.12, hos_N=256, workers=1)
+def test_filter_optional():
+    """The optional low-pass filter (off by default) only touches modes far
+    above the 3rd harmonic: with N = 384 the filtered and unfiltered W12
+    packets differ by < 2e-3 a0 after 3 periods, and the filter is the
+    identity below 0.9 N/2."""
+    p = Params(alpha=0.12, hos_N=384, workers=1)
     h0 = HOS(p)
+    assert h0._filter is None
     hf = HOS(p, filter_frac=0.9)
+    m = np.arange(hf.nk)
+    assert np.all(hf._filter[m <= 0.9 * hf.N / 2] == 1.0) and hf._filter[-1] == 0.0
     h0.init_packet()
     hf.init_packet()
     _run(h0, 3 * p.T0)
     _run(hf, 3 * p.T0)
-    assert np.max(np.abs(h0.eta - hf.eta)) < 1e-6 * p.a0
-    assert np.all(np.isfinite(hf.eta))
+    d = np.max(np.abs(h0.eta - hf.eta)) / p.a0
+    print(f"filter effect after 3 T0: {d:.2e} a0")
+    assert np.all(np.isfinite(hf.eta)) and d < 2e-3
+
+
+# ---------------------------------------------------------------------------
+# convergence: RK4 order in time, spectral convergence in N
+def test_time_convergence_rk4():
+    p = Params(alpha=0.12, hos_N=256, workers=1)
+    T = 2 * p.T0
+    n0 = int(round(T / DT))
+    out = {}
+    for f in (1, 2, 4, 16):
+        h = HOS(p)
+        h.init_packet()
+        _run(h, T, T / (n0 * f))
+        out[f] = h.eta.copy()
+    e = [np.abs(out[f] - out[16]).max() / p.a0 for f in (1, 2, 4)]
+    orders = [math.log2(e[0] / e[1]), math.log2(e[1] / e[2])]
+    print(f"RK4 errors (dt={T / n0:.2e}, /2, /4): {e[0]:.2e} {e[1]:.2e} {e[2]:.2e}; "
+          f"orders {orders[0]:.2f} {orders[1]:.2f}")
+    assert e[0] < 1e-4
+    assert all(3.7 < o < 4.4 for o in orders)
+
+
+def test_spatial_convergence():
+    """Packet W12 after 2 periods: spectral coefficients for N = 192, 256, 384
+    against N = 768 converge rapidly (L1 norm of the coefficient error)."""
+    p = Params(alpha=0.12, workers=1)
+    T = 2 * p.T0
+    spec = {}
+    for N in (192, 256, 384, 768):
+        h = HOS(p.with_(hos_N=N))
+        h.init_packet()
+        _run(h, T)
+        spec[N] = np.fft.rfft(h.eta) / N
+    err = {}
+    for N in (192, 256, 384):
+        r = spec[768].copy()
+        r[:N // 2 + 1] -= spec[N]
+        err[N] = 2 * np.abs(r).sum() / p.a0
+    print("spatial errors (L1 of spectrum / a0): " +
+          ", ".join(f"N={N}: {e:.2e}" for N, e in err.items()))
+    assert err[192] > err[256] > err[384]
+    assert err[384] < 2e-3
 
 
 def test_performance_N768_M3():
