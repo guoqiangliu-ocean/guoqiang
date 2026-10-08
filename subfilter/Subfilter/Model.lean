@@ -17,8 +17,12 @@ to it on an explicit non-trivial `u` and `s`.
 -/
 open scoped BigOperators
 
+noncomputable section
+
 namespace Subfilter
 namespace Model
+
+open Setup
 
 /-- The ring of ensemble fields: two members, each a polynomial in three variables. -/
 abbrev R := Fin 2 → MvPolynomial (Fin 3) ℝ
@@ -34,7 +38,7 @@ def piDeriv (i : Fin 3) : Derivation ℝ R R where
   map_one_eq_zero' := by funext k; simp
   leibniz' f g := by
     funext k
-    simp [Derivation.leibniz, smul_eq_mul, mul_comm]
+    simp [Derivation.leibniz, smul_eq_mul]
 
 @[simp] theorem piDeriv_apply (i : Fin 3) (f : R) (k : Fin 2) :
     piDeriv i f k = MvPolynomial.pderiv i (f k) := rfl
@@ -52,11 +56,13 @@ def Av : R →ₗ[ℝ] R where
 /-- The resolved fields: those that do not depend on the ensemble member. -/
 def resolved : Subalgebra ℝ R where
   carrier := { f | f 0 = f 1 }
-  mul_mem' {f g} hf hg := by simp only [Set.mem_setOf_eq, Pi.mul_apply] at *; rw [hf, hg]
-  one_mem' := by simp
-  add_mem' {f g} hf hg := by simp only [Set.mem_setOf_eq, Pi.add_apply] at *; rw [hf, hg]
-  zero_mem' := by simp
-  algebraMap_mem' r := by simp [Set.mem_setOf_eq, Pi.algebraMap_apply]
+  mul_mem' {f g} (hf : f 0 = f 1) (hg : g 0 = g 1) := by
+    change f 0 * g 0 = f 1 * g 1; rw [hf, hg]
+  one_mem' := rfl
+  add_mem' {f g} (hf : f 0 = f 1) (hg : g 0 = g 1) := by
+    change f 0 + g 0 = f 1 + g 1; rw [hf, hg]
+  zero_mem' := rfl
+  algebraMap_mem' r := rfl
 
 @[simp] theorem mem_resolved (f : R) : f ∈ resolved ↔ f 0 = f 1 := Iff.rfl
 
@@ -89,7 +95,7 @@ theorem half_add_self (c : P) : (2:ℝ)⁻¹ • (c + c) = c := by
 
 /-- Idempotence `Av ∘ Av = Av`. -/
 theorem Av_idem (f : R) : Av (Av f) = Av f := by
-  funext k; simp [half_add_self]
+  funext k; exact half_add_self _
 
 /-- `Av (f − Av f) = 0`: the fluctuation has zero mean. -/
 theorem Av_fluct (f : R) : Av (f - Av f) = 0 := by
@@ -142,8 +148,7 @@ def sModel : V R := ![fun _ => MvPolynomial.X 2, 0, 0]
 
 theorem uModel_div : setup.div uModel = 0 := by
   funext k
-  simp [div, Fin.sum_univ_three, setup, uModel]
-  fin_cases k <;> simp
+  fin_cases k <;> simp [Setup.div, Fin.sum_univ_three, setup, uModel]
 
 theorem sModel_resolved : ∀ i, sModel i ∈ setup.resolved := by
   intro i; fin_cases i <;> simp [sModel, setup]
@@ -162,3 +167,5 @@ theorem identity_one_model :
 
 end Model
 end Subfilter
+
+end

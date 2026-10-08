@@ -26,10 +26,8 @@ theorem step5_weight (σ g k a z N : ℝ) (hσ : 0 < σ) (hdisp : σ ^ 2 = g * k
   have key : a ^ 2 * σ * k * Real.exp (2 * k * z)
       = a ^ 2 * σ ^ 2 * k * Real.exp (2 * k * z) / σ := by
     field_simp
-    ring
   rw [key, hdisp, hN]
   field_simp
-  ring
 
 /-- **Step 5 (normalisation).** For `k > 0`, `∫_{-∞}^0 2k e^{2kz} dz = 1`. -/
 theorem step5_weight_integral (k : ℝ) (hk : 0 < k) :

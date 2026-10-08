@@ -1,4 +1,4 @@
-import Mathlib.Data.Real.Basic
+import Mathlib.Basic.Real.Basic
 import Mathlib.RingTheory.Derivation.Basic
 import Mathlib.Algebra.Algebra.Subalgebra.Basic
 import Mathlib.Data.Fin.VecNotation
@@ -36,17 +36,17 @@ namespace Subfilter
 This structure **is** the hypothesis list of the identity. -/
 structure Setup (R : Type*) [CommRing R] [Algebra ℝ R] where
   /-- the three partial derivatives -/
-  d        : Fin 3 → Derivation ℝ R R
+  d : Fin 3 → Derivation ℝ R R
   /-- the filter / average -/
-  Av       : R →ₗ[ℝ] R
+  Av : R →ₗ[ℝ] R
   /-- `Av` commutes with every derivative -/
-  Av_comm  : ∀ (i : Fin 3) (f : R), Av (d i f) = d i (Av f)
+  Av_comm : ∀ (i : Fin 3) (f : R), Av (d i f) = d i (Av f)
   /-- the resolved (filtered-scale) fields -/
   resolved : Subalgebra ℝ R
   /-- resolved fields pass through the average -/
-  Av_res   : ∀ s ∈ resolved, ∀ f : R, Av (s * f) = s * Av f
+  Av_res : ∀ s ∈ resolved, ∀ f : R, Av (s * f) = s * Av f
 
-variable {R : Type*} [CommRing R] [Algebra ℝ R]
+variable {R : Type*} [CommRing R]
 
 /-- Vector fields: triples of ring elements. -/
 abbrev V (R : Type*) := Fin 3 → R
@@ -81,19 +81,21 @@ theorem outer_self_symm (u : V R) (i j : Fin 3) : outer u u i j = outer u u j i 
 
 end algebra_only
 
-variable (S : Setup R)
+variable [Algebra ℝ R] (S : Setup R)
+
+namespace Setup
 
 /-! ### Differential operators built from the derivations. -/
 
 /-- `(grad f) i = d i f`. -/
 def grad (f : R) : V R := fun i => S.d i f
 /-- `div u = ∑ i, d i (u i)`. -/
-def div  (u : V R) : R := ∑ i, S.d i (u i)
+def div (u : V R) : R := ∑ i, S.d i (u i)
 /-- `curl u`, explicit components. -/
 def curl (u : V R) : V R :=
   ![S.d 1 (u 2) - S.d 2 (u 1), S.d 2 (u 0) - S.d 0 (u 2), S.d 0 (u 1) - S.d 1 (u 0)]
 /-- `(a·∇)b`. -/
-def adv  (a b : V R) : V R := fun i => ∑ j, a j * S.d j (b i)
+def adv (a b : V R) : V R := fun i => ∑ j, a j * S.d j (b i)
 /-- `(∇·T)_i = ∑ j, ∂_j T_ij`. -/
 def divT (Tt : T R) : V R := fun i => ∑ j, S.d j (Tt i j)
 /-- Componentwise average of a vector field. -/
@@ -102,6 +104,10 @@ def AvV (u : V R) : V R := fun i => S.Av (u i)
 def AvT (Tt : T R) : T R := fun i j => S.Av (Tt i j)
 /-- `(b_j ∂_i b_j)_i`, i.e. `½ ∇|b|²` written without the `½`. -/
 def gradHalfSq (b : V R) : V R := fun i => ∑ j, b j * S.d i (b j)
+
+end Setup
+
+open Setup
 
 /-! ### Step 1 -/
 
@@ -167,7 +173,8 @@ theorem Av_dot_res (s X : V R) (hs : ∀ i, s i ∈ S.resolved) :
 theorem AvV_divT (Tt : T R) : S.AvV (S.divT Tt) = S.divT (S.AvT Tt) := by
   funext i; simp only [AvV, divT, AvT, map_sum, S.Av_comm]
 
-/-- **Step 3c.** `AvV (gradHalfSq u) = ½ ∇ (Av (u·u))`.  Uses: Leibniz (Step 1'), linearity, `Av_comm`. -/
+/-- **Step 3c.** `AvV (gradHalfSq u) = ½ ∇ (Av (u·u))`.
+Uses: Leibniz (Step 1'), linearity, `Av_comm`. -/
 theorem AvV_gradHalfSq (u : V R) :
     S.AvV (S.gradHalfSq u) = fun i => (2:ℝ)⁻¹ • S.d i (S.Av (dot u u)) := by
   funext i

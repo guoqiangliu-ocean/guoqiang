@@ -7,6 +7,7 @@ defaultTargets = ["Subfilter"]
 pp.unicode.fun = true # pretty-prints `fun a ↦ b`
 relaxedAutoImplicit = false
 weak.linter.mathlibStandardSet = true
+weak.linter.style.header = false   # not a Mathlib contribution
 maxSynthPendingDepth = 3
 
 [[require]]
