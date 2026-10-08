@@ -1,0 +1,111 @@
+\documentclass[10pt]{article}
+\usepackage[a4paper,left=1.9cm,right=1.9cm,top=1.5cm,bottom=1.5cm]{geometry}
+\usepackage{amsmath,amssymb,bm,mathptmx,microtype,enumitem}
+\usepackage{titlesec}
+\titlespacing*{\subsection}{0pt}{6pt plus 1pt}{1pt}\titleformat{\subsection}{\normalfont\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\renewcommand{\thesubsection}{\arabic{subsection}}
+\setlength{\parindent}{0pt}\setlength{\parskip}{2.5pt plus 1pt}\setlength{\emergencystretch}{2em}
+\AtBeginDocument{\setlength{\abovedisplayskip}{4pt}\setlength{\belowdisplayskip}{4pt}\setlength{\abovedisplayshortskip}{2pt}\setlength{\belowdisplayshortskip}{2pt}}
+\newcommand{\av}[1]{\langle #1\rangle}\newcommand{\uS}{\bm u^S}\newcommand{\WS}{\mathcal W_S}\newcommand{\PS}{\mathcal P_S}
+\newcommand{\Ut}{\widetilde{\bm U}}
+\newcommand{\bu}{\bm u}\newcommand{\bU}{\bm U}\newcommand{\bxi}{\bm\xi}\newcommand{\dd}{\mathrm d}
+\begin{document}
+\begin{center}{\large\bfseries The identity behind the sub-filter energy ledger: derivation and scope}\\[2pt]
+\end{center}
+\vspace{-2pt}\rule{\textwidth}{0.4pt}
+This note derives, step by step, the identity used in the letter (its eq.~1) for the energy exchange between the waves and the part of the current that the Doppler term does not see, and states its scope. Every step says what it uses. The identity concerns the energy; whether the same stress also changes the wave action is a separate question, for the action equation, and is not treated here.
+
+\subsection{Statement}
+Let the current be $\bu=\bU+\bu'$, with $\bU=\av{\bu}$ the filtered current and $\bu'$ the rest, and let $\av\cdot$ be a Reynolds average: linear, commuting with derivatives, idempotent, so $\av{\bu'}=0$ and $\av{\bU X}=\bU\av X$. An ensemble average or a horizontal average is such an operator; a spatial filter of finite width is not (\S\ref{sec:scope}). Let $\nabla\cdot\bu'=0$, $\bm\omega'=\nabla\times\bu'$, and let the Stokes drift $\uS$ be deterministic and vary only on the filtered scales, so that $\av{\uS X}=\uS\av X$. Then
+\begin{equation}
+\rho\,\av{\bu'\cdot(\uS\times\bm\omega')}\;+\;\uS\!\cdot\bm F^R\;=\;-\rho\,\uS\!\cdot\nabla k_t,
+\qquad \bm F^R\equiv-\rho\,\nabla\cdot\av{\bu'\bu'},\quad k_t\equiv\tfrac12\av{|\bu'|^2}.
+\tag{1}\label{eq:id}
+\end{equation}
+\setcounter{equation}{1}
+
+\subsection{Step 1: a pointwise identity, no assumption}
+For any vector field $\bm b$, in index notation with $\epsilon_{ijk}\epsilon_{klm}=\delta_{il}\delta_{jm}-\delta_{im}\delta_{jl}$,
+\[
+[\bm b\times(\nabla\times\bm b)]_i=\epsilon_{ijk}b_j\epsilon_{klm}\partial_lb_m=b_j\partial_ib_j-b_j\partial_jb_i
+=\partial_i\big(\tfrac12|\bm b|^2\big)-(\bm b\cdot\nabla)b_i .
+\]
+With $\bm b=\bu'$ and the sign reversed, $\bm\omega'\times\bu'=(\bu'\cdot\nabla)\bu'-\nabla\tfrac12|\bu'|^2$. The scalar triple product is cyclic, $\bu'\cdot(\uS\times\bm\omega')=\uS\cdot(\bm\omega'\times\bu')$, so
+\begin{equation}
+\bu'\cdot(\uS\times\bm\omega')=\uS\cdot\big[(\bu'\cdot\nabla)\bu'-\nabla\tfrac12|\bu'|^2\big].
+\label{eq:s1}
+\end{equation}
+The work of the Craik--Leibovich force on the fluid is the Stokes velocity dotted with the rotational part of the fluid's own advective acceleration. This is the step (A2) of the barotropic calculation, applied to $\bu'$.
+
+\subsection{Step 2: solenoidality}
+$(\bu'\cdot\nabla)u'_i=u'_j\partial_ju'_i=\partial_j(u'_iu'_j)-u'_i\,\partial_ju'_j=\partial_j(u'_iu'_j)$, using $\nabla\cdot\bu'=0$. Hence
+\begin{equation}
+\bu'\cdot(\uS\times\bm\omega')=u^S_i\,\partial_j(u'_iu'_j)-u^S_j\,\partial_j\big(\tfrac12|\bu'|^2\big).
+\label{eq:s2}
+\end{equation}
+
+\subsection{Step 3: the average}
+Apply $\av\cdot$ to (\ref{eq:s2}). Linearity and commutation with $\partial_j$ give $\av{\partial_j(u'_iu'_j)}=\partial_j\av{u'_iu'_j}$; the assumption on $\uS$ takes $u^S_i$ and $u^S_j$ through the average. Therefore
+\[
+\av{\bu'\cdot(\uS\times\bm\omega')}=u^S_i\,\partial_j\av{u'_iu'_j}-\uS\!\cdot\nabla k_t
+=-\tfrac1\rho\,\uS\!\cdot\bm F^R-\uS\!\cdot\nabla k_t ,
+\]
+and multiplying by $\rho$ gives (\ref{eq:id}). $\square$ Three facts were used, each once: the pointwise identity, $\nabla\cdot\bu'=0$, and the passage of $\uS$ through the average. Neither $\av{\bu'}=0$ nor the idempotence of the average is needed for (\ref{eq:id}); they enter only in item 3 of \S\ref{sec:scope}.
+
+\subsection{Step 4: a second route, which shows where the Stokes production sits}
+Take the general identity $\bm a\times(\nabla\times\bm b)=\nabla(\bm a\cdot\bm b)-(\bm a\cdot\nabla)\bm b-(\bm b\cdot\nabla)\bm a-\bm b\times(\nabla\times\bm a)$ with $\bm a=\uS$, $\bm b=\bu'$, and dot it with $\bu'$; the last term drops because $\bu'\cdot(\bu'\times\cdot)=0$:
+\[
+\bu'\cdot(\uS\times\bm\omega')=\underbrace{\bu'\cdot\nabla(\uS\!\cdot\bu')}_{\rm I}\;\underbrace{-\;\bu'\cdot(\uS\!\cdot\nabla)\bu'}_{\rm II}\;\underbrace{-\;\bu'\cdot(\bu'\cdot\nabla)\uS}_{\rm III}.
+\]
+I $=\partial_i(u'_iu^S_ju'_j)$ by $\nabla\cdot\bu'=0$; expanding the product, I $=u^S_j\partial_i(u'_iu'_j)+u'_iu'_j\partial_iu^S_j$. II $=-(\uS\cdot\nabla)\tfrac12|\bu'|^2$. III $=-u'_iu'_j\partial_ju^S_i$. The second piece of I and III add to $u'_iu'_j(\partial_iu^S_j-\partial_ju^S_i)=0$, a symmetric tensor against an antisymmetric one, pointwise. What remains is (\ref{eq:s2}) again. But before cancelling, average and read the three terms separately:
+\begin{equation}
+\rho\av{\bu'\cdot(\uS\times\bm\omega')}=\underbrace{-\rho\av{u'_iu'_j}\partial_ju^S_i}_{\text{Stokes production}}\;+\;\underbrace{\partial_i\big[\rho\av{u'_i\,(\uS\!\cdot\bu')}\big]}_{\text{transport}}\;\underbrace{-\;\rho\,\uS\!\cdot\nabla k_t}_{\text{Stokes transport}} .
+\label{eq:s4}
+\end{equation}
+Averaging the production term uses that the gradient $\partial_ju^S_i$, and not only $\uS$ itself, passes through the average; (\ref{eq:id}) does not need this, because in (\ref{eq:id}) the derivatives fall on $\bu'$ and on $k_t$ and never on $\uS$ (item 2 of \S\ref{sec:scope}). The first term is the Stokes production of the wave-averaged TKE equation, and (\ref{eq:s4}) is the bookkeeping of that equation: production plus a transport divergence. Two bookkeepings of one quantity, not two contributions. Expanding the divergence makes this explicit:
+\[
+\rho\av{\bu'\cdot(\uS\times\bm\omega')}=\underbrace{\rho\av{u'_iu'_j}\partial_iu^S_j-\rho\av{u'_iu'_j}\partial_ju^S_i}_{=\,0\ \text{by symmetry}}+\;u^S_j\,\partial_i\big(\rho\av{u'_iu'_j}\big)-\rho\,\uS\!\cdot\nabla k_t ,
+\]
+so the production term is cancelled pointwise by a piece of the transport divergence, and what survives is $-\uS\!\cdot\bm F^R-\rho\uS\!\cdot\nabla k_t$, which is (\ref{eq:id}). So (\ref{eq:id}) reads the Craik--Leibovich work as Reynolds force on $\bU$ plus Stokes transport, and (\ref{eq:s4}) reads it as Stokes production plus transport; the Stokes production and the $\bm F^R$ term are the same energy seen twice, and must not be added. Note that (\ref{eq:s4}) has two transport terms, the divergence and the Stokes advection $-\rho\uS\!\cdot\nabla k_t$; only if in addition $\nabla\cdot\uS=0$ does the second become a divergence too, $-\nabla\cdot(\rho k_t\uS)$, so that
+\[
+\rho\av{\bu'\cdot(\uS\times\bm\omega')}=-\rho\av{u'_iu'_j}\partial_ju^S_i+\nabla\cdot\big[\rho\av{\bu'(\uS\!\cdot\bu')}-\rho k_t\uS\big],
+\]
+the local Stokes production plus one transport divergence. Without $\nabla\cdot\uS=0$, (\ref{eq:s4}) is the form to use. Locally the two readings assign the energy to different places; in the volume integral they agree when the transport has no flux through the boundaries. None of this algebra is new. The TKE budget of the wave-averaged equations with the Stokes production term is McWilliams, Sullivan \& Moeng (1997, your eq.~5.1); the rewriting of the vortex force and Bernoulli head as Stokes advection plus a Stokes shear force, of which only the latter exchanges energy with the waves, is Suzuki \& Fox-Kemper (2016), and their terms are I, II and III above: the head and the Stokes advection are the transports, the Stokes shear force work is the production; and the energy compartments of the wave-averaged equations, including the cross energy $\bU\!\cdot\uS$, are those of Czeschel \& Eden (2023). What this note adds is the reading of the surviving term in Step 5: $-\uS\!\cdot\bm F^R$ is the Doppler tendency of the filtered current, the cross energy is the Doppler energy of the wave, and so the sub-filter current needs no Doppler account of its own.
+
+\subsection{Step 5: what the three terms of (\ref{eq:id}) are}
+\emph{Left, first term.} In the Craik--Leibovich equations the wave acts on the current through the vortex force $\rho\,\uS\times\bm\omega$ and a Bernoulli head $-\rho\nabla K$. On the sub-filter current the vortex force does the work $\rho\av{\bu'\cdot(\uS\times\bm\omega')}$ at all of its scales; the head does $-\rho\av{\bu'\cdot\nabla K'}=-\rho\nabla\cdot\av{\bu'K'}$, a pure flux with $\nabla\cdot\bu'=0$, zero through boundaries where $w'=0$. So the first term is the rate at which the waves feed sub-filter kinetic energy.
+
+\emph{$\uS\!\cdot\bm F^R$.} $\bm F^R$ is the force that the sub-filter stress exerts on the filtered current in the filtered momentum equation, $\rho\,\partial_t\bU=\dots+\bm F^R$. The wave model sees $\bU$ only through the Doppler shift $\omega=\sigma+\bm k\cdot\Ut$, $\Ut=\int_{-\infty}^02ke^{2kz}\,\bU\,\dd z$ (Stewart \& Joy 1974), so the Doppler energy of the wave, $\rho\,\bm k\cdot\Ut N$, changes at the rate $\rho N\bm k\cdot\partial_t\Ut$ at fixed $N$. The term $\rho\bm k\cdot\Ut\,\dot N$ belongs to the action equation and is not part of this exchange; the identity is evaluated at fixed $N$. Now $N\bm k\,2ke^{2kz}=\uS$ as vectors: with $N=ga^2/2\sigma$ and $\sigma^2=gk$, $Nk\cdot2ke^{2kz}=ga^2k^2e^{2kz}/\sigma=a^2\sigma k\,e^{2kz}=u^S$. ($N$ is the action per unit area and unit density, so $\rho\sigma N=E_{\rm int}$ is the usual $E/\sigma$ times $\sigma$; readers who put $\rho$ inside $N$ should read $\rho N$ for $N$ throughout.) Hence the part of the Doppler tendency due to $\bm F^R$ is
+\[
+\rho N\bm k\cdot\partial_t\Ut\big|_{\bm F^R}=\int\rho\,\uS\!\cdot\tfrac1\rho\bm F^R\,\dd z=\int\uS\!\cdot\bm F^R\,\dd z .
+\]
+So $\uS\!\cdot\bm F^R$ is the rate at which the sub-filter current changes the wave's Doppler energy, through $\bU$, per unit volume. The step rests on one structural fact, that the Doppler weight of the wave is proportional to its Stokes drift profile; in finite depth the weight is $2k\cosh2k(z+h)/\sinh2kh$ (Kirby \& Chen 1989) and the Stokes drift is again proportional to it, so the identification is not limited to deep water.
+
+\emph{Right.} $-\rho\uS\!\cdot\nabla k_t$ is the advection of sub-filter kinetic energy by the Stokes drift; with $\nabla\cdot\uS=0$ it is $-\nabla\cdot(\rho\uS k_t)$, a transport. It vanishes identically for a horizontal average, where $\nabla k_t$ is vertical and $\uS$ horizontal, and it integrates to zero over a closed domain.
+
+\emph{Reading.} Integrated over a closed domain, with $\nabla\cdot\uS=0$ and no flux of the Bernoulli head through the boundaries, (\ref{eq:id}) says: the energy that the Craik--Leibovich force puts into the sub-filter current balances the energy that the sub-filter current takes out of the wave's Doppler account by pushing on the filtered current. Locally the two differ by the transport terms of (\ref{eq:s4}), which (\ref{eq:id}) keeps explicit. The wave side and the current side are computed from different equations, the action equation with $\omega=\sigma+\bm k\cdot\Ut$ and the current momentum equation, and agree by (\ref{eq:id}). At the resolved level the same statement is $C=-\rho\,\bm p\cdot\partial_t\bu$ of the barotropic calculation, with $\bU$ in place of $\bu'$; the only difference is that the resolved current enters $\omega$ directly, while the sub-filter current enters it through $\bm F^R$ on $\bU$. This exchange enters the wave through $\omega$. Whether the same stress also changes $N$ is a question for the action equation, which (\ref{eq:id}) neither asks nor answers.
+
+\subsection{Step 6: the horizontally homogeneous check}
+With $\uS=u^S(z)\hat{\bm x}$ and horizontal averaging, $F^R_x=-\rho\,\partial_z\av{u'w'}=\partial_z\bar\tau$ with $\bar\tau=-\rho\av{u'w'}$ the mean shear stress carried by the sub-filter motion, and the right side vanishes. Write $\tau_s\equiv\bar\tau(0)$ for its surface value and $\WS\equiv\tau_su^S(0)$, $\PS\equiv\int\bar\tau\,\partial_zu^S\dd z$, as in the letter. Then
+\[
+\rho\av{\bu'\cdot(\uS\times\bm\omega')}=-u^S\partial_z\bar\tau,\qquad
+\int_{-\infty}^0\rho\av{\bu'\cdot(\uS\times\bm\omega')}\dd z=-\big[u^S\bar\tau\big]_{-\infty}^{0}+\int\bar\tau\,\partial_zu^S\,\dd z=\PS-\WS,
+\]
+and $\int\uS\!\cdot\bm F^R\dd z=\int u^S\partial_z\bar\tau\,\dd z=\WS-\PS=\rho N\,\dd\omega/\dd t$, which is the Doppler equation (2) of the letter for a sheared column, in which $\bar\tau$ is the total mean stress continued to the surface, $\bar\tau(0)=\tau_s$ the wind stress. That equation is the depth integral of (\ref{eq:id}) when the stress at the surface is carried by the sub-filter motion itself. If instead $w'=0$ at the surface and the surface stress is carried there by viscosity or by the SGS part, then $\bar\tau(0)=0$ for the part covered by (\ref{eq:id}), the boundary term vanishes, and $\WS$ enters the Doppler equation through the viscous or SGS part of $\partial_t\bU$ instead, with the same total $\WS-\PS$. In this horizontally homogeneous geometry the Stokes advection term vanishes and the only transport is the divergence of (\ref{eq:s4}), $\partial_z(\rho\av{w'u'}u^S)$; its depth integral is $-\WS$, which is the difference between the Craik--Leibovich work $\PS-\WS$ and the Stokes production $\PS$.
+
+\subsection{Scope: what was used, and what remains outside}\label{sec:scope}
+\begin{enumerate}[leftmargin=1.6em,itemsep=1pt,topsep=1pt]
+\item $\nabla\cdot\bu'=0$ (Step 2). Boussinesq or incompressible fluctuations.
+\item $\uS$ passes through the average (Step 3). Exact for an ensemble average and for a horizontal average under a plane wave. For a spatial filter of width $\ell$ it requires $\uS$ to vary on scales large compared with $\ell$, i.e.\ the wave envelope wider than the filter. The averaged production form (\ref{eq:s4}) needs in addition that $\nabla\uS$ passes through the average; for an ensemble or horizontal average this is automatic, for a finite-width filter it is a further condition on the envelope.
+\item $\av{\bu'\bu'}$ is the stress of the filtered momentum equation (Step 5). Two situations have to be kept apart.
+
+\emph{Horizontal average of a horizontally periodic LES.} The horizontal average is a Reynolds operator, so (\ref{eq:id}) holds exactly for the resolved fields, with $\bu'$ the resolved departure from the horizontal mean and $\av{\bu'\bu'}$ the resolved Reynolds stress. The SGS stress enters the Doppler side through $\partial_t\bU$ and the current side through its modelled Stokes production, $\tau^{\rm SGS}_{xz}\partial_zu^S$; the two agree only as well as the SGS model does. This is the split of point 2 of the letter.
+
+\emph{A Doppler filter of finite width.} If $\bU$ is instead defined by a spatial filter at the scale $\sim1/k$ (point 4 of the letter), with $\bU=\av\bu$ and $\bu'=\bu-\bU$, the stress in the filtered equation is $\tau^{\rm sgs}_{ij}=\av{u_iu_j}-U_iU_j=L_{ij}+C_{ij}+\av{u'_iu'_j}$, with the Leonard term $L_{ij}=\av{U_iU_j}-U_iU_j$ and the cross term $C_{ij}=\av{U_iu'_j}+\av{u'_iU_j}$ (Leonard 1974; the sum is an identity for any linear filter). The wave side sees $\tau^{\rm sgs}$ through $\partial_t\bU$; the identity has $\av{u'_iu'_j}$; the mismatch is $-\rho\,u^S_i\,\partial_j(L_{ij}+C_{ij})$. For a Reynolds average $\av{U_iU_j}=U_iU_j$ and $\av{U_iu'_j}=U_i\av{u'_j}=0$, so both vanish. For a filter of finite width both are in general non-zero, a sharp spectral cut-off included: the product of two resolved fields has content beyond the cut-off, so $L=-(1-\av\cdot)(U_iU_j)\neq0$, and $C\neq0$ even though $\av{\bu'}=0$.
+\item The Craik--Leibovich form of the wave forcing (Step 5): vortex force and Bernoulli head, the head doing no net work on $\bu'$.
+\item The Doppler current is $\Ut$ with weight $2ke^{2kz}$ and the filtered current obeys $\rho\,\partial_t\bU\ni\bm F^R$ (Step 5). Only the part of $\partial_t\bU$ due to $\bm F^R$ is used; other forces on $\bU$ have their own entries.
+\end{enumerate}
+In one sentence: (\ref{eq:id}) is an exact Reynolds-average energy identity, not a generic finite-width-filter identity; for an LES filter the Leonard and cross contributions have to be retained. Outside the identity, by construction, is every action of the sub-filter current on the waves that does not pass through $\bm F^R$ on $\bU$, and every change of the action $N$.
+
+{\footnotesize\textbf{References.} Czeschel \& Eden 2023, arXiv:2311.13354. Kirby \& Chen 1989 \textit{JGR} 94, 1013. Leonard 1974 \textit{Adv.\ Geophys.}\ 18A, 237. McWilliams, Sullivan \& Moeng 1997 \textit{JFM} 334, 1. Stewart \& Joy 1974 \textit{Deep-Sea Res.}\ 21, 1039. Suzuki \& Fox-Kemper 2016 \textit{JGR Oceans} 121, 3579.\par}
+\end{document}
