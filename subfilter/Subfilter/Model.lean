@@ -1,3 +1,6 @@
+import Subfilter.Identity
+import Mathlib.Algebra.MvPolynomial.PDeriv
+
 /-!
 # A non-vacuous model of the axioms (Part 2)
 
@@ -12,9 +15,6 @@ We prove the two axioms `Av_comm`, `Av_res`, and in addition that `Av` is idempo
 non-degenerate (`resolved ≠ ⊤`, `Av ≠ id`, `d i ≠ 0`). Finally `identity_one` is specialised
 to it on an explicit non-trivial `u` and `s`.
 -/
-import Subfilter.Identity
-import Mathlib.Algebra.MvPolynomial.PDeriv
-
 open scoped BigOperators
 
 namespace Subfilter

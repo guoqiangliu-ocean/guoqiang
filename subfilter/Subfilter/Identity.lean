@@ -1,3 +1,11 @@
+import Mathlib.Data.Real.Basic
+import Mathlib.RingTheory.Derivation.Basic
+import Mathlib.Algebra.Algebra.Subalgebra.Basic
+import Mathlib.Data.Fin.VecNotation
+import Mathlib.Algebra.BigOperators.Fin
+import Mathlib.Tactic.Ring
+import Mathlib.Tactic.FinCases
+
 /-!
 # The sub-filter energy identity (Part 1)
 
@@ -20,14 +28,6 @@ used only in `leonard_vanish`.
 
 Each theorem's docstring names the Step of the note it formalises and the axioms it uses.
 -/
-import Mathlib.RingTheory.Derivation.Basic
-import Mathlib.Algebra.Algebra.Subalgebra.Basic
-import Mathlib.Data.Fin.VecNotation
-import Mathlib.Algebra.BigOperators.Fin
-import Mathlib.Tactic.Ring
-import Mathlib.Tactic.FinCases
-import Mathlib.Tactic.LinearCombination
-
 open scoped BigOperators
 
 namespace Subfilter
@@ -250,8 +250,8 @@ theorem step4_split (u s : V R) (hu : S.div u = 0) :
   have hA' : ∑ i, ∑ j, u i * u j * S.d i (s j) - ∑ i, ∑ j, u i * u j * S.d j (s i) = 0 := by
     rw [← hA]
     simp only [outer, mul_sub, Finset.sum_sub_distrib]
-  rw [pointwise S u s hu, div_flux S u s hu, dot_divT_outer S u s hu]
-  linear_combination (-1 : R) * hA'
+  rw [pointwise S u s hu, div_flux S u s hu, dot_divT_outer S u s hu, sub_eq_zero.mp hA']
+  ring
 
 /-- The averaged three-term split (eq. (s4) of the note):
 

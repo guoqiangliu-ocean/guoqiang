@@ -1,3 +1,6 @@
+import Mathlib.Analysis.SpecialFunctions.ImproperIntegrals
+import Mathlib.MeasureTheory.Integral.IntervalIntegral.IntegrationByParts
+
 /-!
 # The analytic steps (Part 3, optional)
 
@@ -7,9 +10,6 @@
 * **Step 6.** Integration by parts on `[-h, 0]` with `τ(-h) = 0`:
   `−∫ uˢ ∂_z τ̄ = ∫ τ̄ ∂_z uˢ − τ̄(0) uˢ(0)`, i.e. `−∫ uˢ ∂_z τ̄ = P_S − W_S`.
 -/
-import Mathlib.Analysis.SpecialFunctions.ImproperIntegrals
-import Mathlib.MeasureTheory.Integral.IntervalIntegral.IntegrationByParts
-
 open MeasureTheory Set
 
 namespace Subfilter
